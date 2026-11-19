@@ -4,6 +4,8 @@ package update
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -64,11 +66,20 @@ func AssetArch(goarch string) string {
 
 // RemoveOld deletes the copy an earlier update left beside executable. Windows
 // cannot delete a running file, so the update renames it to a hidden
-// `.<name>.old` instead, and only a later start can remove it. A failure is
-// ignored: the previous copy may still be exiting, and the next start tries again.
+// `.<name>.old` instead, and only a later start can remove it. After a
+// restart the previous copy is still exiting when this one starts, so it keeps
+// trying for a little while; if that is not enough, the next start tries again.
 func RemoveOld(executable string) {
 	dir, name := filepath.Split(executable)
-	_ = os.Remove(filepath.Join(dir, "."+name+".old"))
+	old := filepath.Join(dir, "."+name+".old")
+	go func() {
+		for range 15 {
+			if err := os.Remove(old); err == nil || errors.Is(err, fs.ErrNotExist) {
+				return
+			}
+			time.Sleep(time.Second)
+		}
+	}()
 }
 
 // State returns the current state.
