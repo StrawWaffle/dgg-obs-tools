@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en" class="overlay-document">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width" />
+    <title>Watchers</title>
+    <!--
+      destiny.gg's whole emote stylesheet, straight from their CDN. Its image
+      URLs are relative, so they resolve against the CDN. The overlay rewrites
+      this href with the emote list's version, which is what gets a new emote
+      past a browser source's cached copy; it is changed in place so the
+      cascade order stays as it is.
+    -->
+    <link id="emote-stylesheet" rel="stylesheet" href="https://r2cdn.destiny.gg/emotes/emotes.css" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/watchers/main.tsx"></script>
+  </body>
+</html>

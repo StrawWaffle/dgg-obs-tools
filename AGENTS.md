@@ -1,0 +1,31 @@
+# Project instructions
+
+## Identity
+
+- Published as **StrawWaffle**. Commit only with this repo's local
+  `user.name`/`user.email`, and add no co-author or attribution lines; the
+  hooks in `.git/hooks` reject them.
+- Use only StrawWaffle's credentials for GitHub. Don't use the `gh` CLI here
+  unless it is logged in as StrawWaffle.
+- No links to, or mentions of, other projects or accounts of the owner.
+
+## Engineering
+
+- Keep it small: one portable executable per platform, no installer, no
+  runtime to install. Prefer the standard library and the dependencies already
+  here before adding one.
+- Grow in layers. Each change should leave a working program.
+- Remove obsolete paths instead of keeping compatibility layers.
+- Be gentle with destiny.gg: one anonymous chat connection, held only while a
+  page is open, with chat-gui's backoff on reconnect.
+
+## Layout
+
+- `main.go`: flags, single-instance check, HTTP server on loopback.
+- `internal/dgg`: chat socket, roster, emote list, flair colours.
+- `internal/watchers`: the tracker that feeds open pages.
+- `internal/settings`: saved settings and their limits (mirrored in
+  `web/src/watchers/options.ts`).
+- `internal/server`: routes, server-sent events, localhost guards.
+- `web/`: the setup page and the overlays (React, Vite), embedded into the
+  executable from `web/dist`.
