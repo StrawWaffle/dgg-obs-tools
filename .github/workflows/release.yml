@@ -26,6 +26,6 @@ jobs:
         working-directory: web
       - run: go vet ./... && go test ./...
       - run: scripts/build-release.sh "$GITHUB_REF_NAME"
-      - run: gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --generate-notes
+      - run: gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --notes-file scripts/release-notes.md --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}

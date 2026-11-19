@@ -20,13 +20,13 @@ Get the file for your system from the
 [latest release](https://github.com/StrawWaffle/dgg-obs-tools/releases/latest).
 There's nothing to install: put it anywhere and run it.
 
-- **Windows:** `dgg-obs-tools_windows_amd64.exe`. The file isn't signed, so the
-  first time Windows may say it protected your PC: click **More info**, then
-  **Run anyway**.
-- **macOS:** `dgg-obs-tools_darwin_arm64.tar.gz` (Apple silicon) or
-  `_darwin_amd64` (Intel). Unpack it, then the first time right-click the file
+- **Windows:** `dgg-obs-tools_windows_x64.exe` (or `_arm64.exe` on a Snapdragon
+  laptop). The file isn't signed, so the first time Windows may say it
+  protected your PC: click **More info**, then **Run anyway**.
+- **macOS:** `dgg-obs-tools_macos_arm64.tar.gz` (Apple silicon) or
+  `_macos_x64` (Intel). Unpack it, then the first time right-click the file
   and choose **Open**, because it isn't signed.
-- **Linux:** `dgg-obs-tools_linux_amd64.tar.gz` (or `_arm64`). Unpack and run.
+- **Linux:** `dgg-obs-tools_linux_x64.tar.gz` (or `_arm64`). Unpack and run.
 
 It keeps itself up to date. A few times a day it checks for a new release,
 verifies it against the release's checksums and puts it in place of its own

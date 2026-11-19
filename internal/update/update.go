@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"time"
 
@@ -40,6 +41,25 @@ type Updater struct {
 // New starts with the running version. "dev" builds never update.
 func New(current string) *Updater {
 	return &Updater{state: State{Current: current}}
+}
+
+// AssetOS is how a release file names an operating system: the word people
+// know rather than Go's own, so `macos` instead of `darwin`.
+// scripts/build-release.sh names the files the same way.
+func AssetOS(goos string) string {
+	if goos == "darwin" {
+		return "macos"
+	}
+	return goos
+}
+
+// AssetArch is how a release file names a processor: `x64`, which is what
+// Windows itself calls it, instead of Go's `amd64`, which reads as AMD-only.
+func AssetArch(goarch string) string {
+	if goarch == "amd64" {
+		return "x64"
+	}
+	return goarch
 }
 
 // RemoveOld deletes the copy an earlier update left beside executable. Windows
@@ -95,6 +115,8 @@ func (u *Updater) check(ctx context.Context, executable string) (string, error) 
 	defer cancel()
 
 	updater, err := selfupdate.NewUpdater(selfupdate.Config{
+		OS:   AssetOS(runtime.GOOS),
+		Arch: AssetArch(runtime.GOARCH),
 		// Every release carries checksums.txt, so a damaged or swapped download
 		// is refused rather than run.
 		Validator: &selfupdate.ChecksumValidator{UniqueFilename: "checksums.txt"},
