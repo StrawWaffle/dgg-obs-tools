@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import { readableColor } from '../color';
 import { PlatformIcon } from '../platform';
 import type { ChatMessage, ChatOptions, MessagePart } from '../watchers/options';
-import { censor, highlighted, linkText, visible } from './rules';
+import { censor, continues, highlighted, linkText, visible } from './rules';
 
 /** OBS's browser source defines this; an ordinary browser does not. */
 export const inOBS = typeof window !== 'undefined' && 'obsstudio' in window;
@@ -31,7 +31,16 @@ function Part({ part, options }: { part: MessagePart; options: ChatOptions }) {
   return <>{options.censor === 'on' && part.text ? censor(part.text) : part.text}</>;
 }
 
-function Line({ message, options }: { message: ChatMessage; options: ChatOptions }) {
+function Line({
+  message,
+  options,
+  continued,
+}: {
+  message: ChatMessage;
+  options: ChatOptions;
+  /** Carries on from the line above, so the sender is not named again. */
+  continued: boolean;
+}) {
   const name =
     message.flair && message.platform === 'dgg' ? `chat-name flair-${message.flair}` : 'chat-name';
   const classes = [
@@ -40,21 +49,31 @@ function Line({ message, options }: { message: ChatMessage; options: ChatOptions
     message.removed && options.removed === 'blur' ? 'chat-removed' : '',
     message.action ? 'chat-action' : '',
     message.green ? 'chat-green' : '',
+    continued ? 'chat-continued' : '',
   ]
     .filter(Boolean)
     .join(' ');
 
   return (
     <div className={classes}>
-      {options.icons === 'on' && <PlatformIcon platform={message.platform} />}
-      {options.badges === 'on' &&
-        message.badges?.map((badge) => (
-          <img key={badge.url} className="chat-badge" src={badge.url} alt={badge.label} title={badge.label} />
-        ))}
-      <span className={name} style={message.color ? { color: readableColor(message.color) } : undefined}>
-        {message.nick}
-      </span>
-      {!message.action && <span className="chat-colon">: </span>}
+      {continued ? (
+        // Screen readers and copied text still say who it was.
+        <span className="chat-continues" aria-label={message.nick}>
+          {'> '}
+        </span>
+      ) : (
+        <>
+          {options.icons === 'on' && <PlatformIcon platform={message.platform} />}
+          {options.badges === 'on' &&
+            message.badges?.map((badge) => (
+              <img key={badge.url} className="chat-badge" src={badge.url} alt={badge.label} title={badge.label} />
+            ))}
+          <span className={name} style={message.color ? { color: readableColor(message.color) } : undefined}>
+            {message.nick}
+          </span>
+          {!message.action && <span className="chat-colon">: </span>}
+        </>
+      )}
       {/* `text` is the container chat-gui puts a message's emotes in, and parts
           of destiny.gg's stylesheet are written against it. */}
       <span className="text">
@@ -108,8 +127,13 @@ export default function ChatView({ messages, options }: { messages: ChatMessage[
         onPointerDown={byHand}
         tabIndex={-1}
       >
-        {lines.map((message) => (
-          <Line key={message.id} message={message} options={options} />
+        {lines.map((message, index) => (
+          <Line
+            key={message.id}
+            message={message}
+            options={options}
+            continued={options.group === 'on' && continues(lines[index - 1], message)}
+          />
         ))}
       </div>
       {!following && !inOBS && (

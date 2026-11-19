@@ -175,3 +175,14 @@ html:has(.chat-obs) body {
   margin-right: 4px;
   vertical-align: -3px;
 }
+
+/* A message that carries on from the same sender's line above: no name, set in
+   a little, so the run reads as one person talking. */
+.chat-line.chat-continued {
+  padding-top: 0;
+  padding-left: 20px;
+}
+
+.chat-continues {
+  color: #8a8a8a;
+}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatMessage, ChatOptions } from '../watchers/options';
-import { censor, highlighted, linkText, shown, visible } from './rules';
+import { censor, continues, highlighted, linkText, shown, visible } from './rules';
 
 const OPTIONS: ChatOptions = {
   dgg: 'all',
@@ -12,6 +12,7 @@ const OPTIONS: ChatOptions = {
   icons: 'on',
   badges: 'on',
   censor: 'off',
+  group: 'on',
   highlights: [],
   highlightWatching: 'on',
   links: 'short',
@@ -90,5 +91,17 @@ describe('censoring', () => {
 
   it('leaves words that only contain a short one alone', () => {
     expect(censor('spicy cockpit scumbag')).toBe('spicy cockpit scumbag');
+  });
+});
+
+describe('grouping a run of messages', () => {
+  it('carries on from the same person on the same platform', () => {
+    expect(continues(message(), message({ nick: 'anpan' }))).toBe(true);
+  });
+
+  it('starts again for somebody else, or the same name elsewhere', () => {
+    expect(continues(message(), message({ nick: 'Other' }))).toBe(false);
+    expect(continues(message(), message({ platform: 'kick' }))).toBe(false);
+    expect(continues(undefined, message())).toBe(false);
   });
 });

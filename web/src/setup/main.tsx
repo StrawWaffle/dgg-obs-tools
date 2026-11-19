@@ -226,6 +226,7 @@ const CHAT_CHOICES: { name: ChatChoice; label: string }[] = [
   { name: 'icons', label: 'Platform icons' },
   { name: 'badges', label: 'Badges' },
   { name: 'censor', label: 'Swear words' },
+  { name: 'group', label: 'Runs of messages' },
   { name: 'shadow', label: 'Text shadow' },
   { name: 'links', label: 'Links' },
   { name: 'removed', label: 'Removed by a moderator' },

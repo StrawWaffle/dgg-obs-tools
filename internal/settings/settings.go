@@ -71,6 +71,8 @@ type Chat struct {
 	Badges string `json:"badges"`
 	// Whether swear words and slurs are starred out.
 	Censor string `json:"censor"`
+	// Whether a run of messages from one sender shows their name once.
+	Group string `json:"group"`
 	// Phrases that highlight a message, one per entry, matched without case.
 	Highlights []string `json:"highlights"`
 	// Whether destiny.gg messages from people watching a followed embed stand out.
@@ -107,7 +109,7 @@ func Default() Settings {
 		Enter: "fade", Motion: "drift", Color: "flair", Speed: 100, Size: 100, Roam: 100, Inset: 4, Marks: "on",
 	}, Chat: Chat{
 		DGG: "all", Kick: true, YouTube: true, Twitch: true, Size: 100, Shadow: "soft", Icons: "on",
-		Badges: "on", Censor: "off",
+		Badges: "on", Censor: "off", Group: "on",
 		Highlights: []string{}, HighlightWatching: "on", Links: "short", Removed: "hide", Lines: 150,
 	}}
 }
@@ -252,6 +254,7 @@ func (s *Settings) Validate() error {
 		oneOf("chat icons", c.Icons, switches),
 		oneOf("chat badges", c.Badges, switches),
 		oneOf("chat censor", c.Censor, switches),
+		oneOf("chat group", c.Group, switches),
 		oneOf("chat highlightWatching", c.HighlightWatching, switches),
 		oneOf("chat links", c.Links, linkStyle),
 		oneOf("chat removed", c.Removed, removed),

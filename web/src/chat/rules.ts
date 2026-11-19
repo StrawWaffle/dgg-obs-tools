@@ -62,3 +62,16 @@ const SWEARING = new RegExp(`\\b(?:(?:${STEMS.join('|')})[a-z]*|(?:${WORDS.join(
 export function censor(text: string): string {
   return text.replace(SWEARING, (word) => word[0] + '*'.repeat(word.length - 1));
 }
+
+/**
+ * Whether a message carries on from the one drawn above it: the same person,
+ * on the same platform, so their name need not be said again. Only the lines
+ * actually drawn count, so a hidden message in between does not split a run.
+ */
+export function continues(previous: ChatMessage | undefined, message: ChatMessage): boolean {
+  return (
+    previous !== undefined &&
+    previous.platform === message.platform &&
+    previous.nick.toLowerCase() === message.nick.toLowerCase()
+  );
+}

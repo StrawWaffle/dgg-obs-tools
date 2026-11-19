@@ -119,6 +119,8 @@ export interface ChatOptions {
   badges: 'on' | 'off';
   /** Whether swear words and slurs are starred out. */
   censor: 'on' | 'off';
+  /** Whether a run of messages from one sender shows their name once. */
+  group: 'on' | 'off';
   /** Phrases that highlight a message, matched without case. */
   highlights: string[];
   /** Whether destiny.gg messages from people watching a followed embed stand out. */
@@ -139,6 +141,7 @@ export const CHAT_LABELS = {
   icons: { on: 'Platform icons', off: 'No icons' },
   badges: { on: 'destiny.gg badges', off: 'No badges' },
   censor: { off: 'As written', on: 'Swear words starred out' },
+  group: { on: 'Name once per run', off: 'Name on every line' },
   highlightWatching: { on: 'Highlight embed watchers', off: "Don't highlight them" },
   links: { short: 'Shortened', full: 'In full' },
   removed: { hide: 'Hide them', blur: 'Blur them', keep: 'Keep showing them' },
