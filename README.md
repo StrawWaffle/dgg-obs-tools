@@ -5,13 +5,19 @@ small program: run it, pick an embed, and paste one URL into OBS.
 
 ## Watchers
 
-Shows the people watching a stream (say `kick/destiny`, or several at once)
-as the last emote each of them used, with their name in its chat colour:
+Shows the people watching a stream as the last emote each of them used, with
+their name in its chat colour. It draws from any mix of three sources, each
+followed on its own:
 
-- everyone in destiny.gg chat with that embed open, and
-- everyone talking in the stream's own Kick or YouTube chat, who is watching
-  it too. Their emotes are drawn from Kick's and YouTube's own pictures, and a
-  small K or YT mark can show where they're talking (both can be switched off).
+- **destiny.gg embeds:** everyone in destiny.gg chat with that embed open
+  (say `kick/destiny`).
+- **Kick chats:** everyone talking in a Kick channel's chat.
+- **YouTube chats:** everyone talking in a YouTube stream's chat. A channel
+  handle such as `@destiny` follows whatever that channel has live.
+
+Kick and YouTube emotes are drawn from those sites' own pictures, and a small
+K or YT mark can show where somebody is talking. The same name on two
+platforms is two people.
 
 Layouts include free float, a safe frame around the edges,
 a bottom rail, side columns and bumper cars, plus options for speed, size,
@@ -46,16 +52,19 @@ new version.
 
 1. Run `dgg-obs-tools`. It opens its setup page in your browser at
    `http://localhost:7341/`.
-2. Under **Embeds**, enter each embed on its own line as `platform/name`:
-   `kick/destiny`, `youtube/@destiny` (follows whatever that channel has live,
-   stream after stream) or `youtube/VIDEO_ID`. A `destiny.gg/bigscreen#...`
-   link, or a Kick or YouTube link, works too. Click **Save**. Several embeds
-   are drawn together in one overlay.
+2. Fill in any of the three lists, one entry per line, and click **Save**:
+   - **destiny.gg embeds** as `platform/name`: `kick/destiny`,
+     `youtube/@destiny` or `youtube/VIDEO_ID`, or a `destiny.gg/bigscreen#...` link.
+   - **Kick chats** as a channel name (`destiny`) or a kick.com link.
+   - **YouTube chats** as a handle (`@destiny`), a video id, or a YouTube link.
+
+   Everything listed is drawn together in one overlay.
 3. In OBS add a **Browser** source with the URL `http://localhost:7341/watchers`,
    sized 1920 × 1080.
 
 It runs in the system tray (the menu bar on a Mac), with no window of its
-own: click the icon to open the setup page, and right-click it to quit. Keep it
+own: click the icon to open the setup page. Right-click it to check for an
+update (it downloads, installs and restarts in one go) or to quit. Keep it
 running while you stream. Changes saved on the setup page show up in OBS
 straight away. Running it a second time just opens the setup page of the copy
 that's already running.

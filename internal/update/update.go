@@ -36,13 +36,19 @@ type State struct {
 // place of the running file. The running copy carries on until it is
 // restarted, so an update never cuts a stream short by itself.
 type Updater struct {
+	executable string
+
 	mu    sync.Mutex
 	state State
+	// Held while a check runs, so the background check and one asked for from
+	// the tray never install over each other.
+	checking sync.Mutex
 }
 
-// New starts with the running version. "dev" builds never update.
-func New(current string) *Updater {
-	return &Updater{state: State{Current: current}}
+// New starts with the running version and the file to replace. "dev" builds
+// never update.
+func New(current, executable string) *Updater {
+	return &Updater{executable: executable, state: State{Current: current}}
 }
 
 // AssetOS is how a release file names an operating system: the word people
@@ -89,29 +95,17 @@ func (u *Updater) State() State {
 	return u.state
 }
 
-// Run checks now and then every few hours until an update is installed over
-// executable or ctx ends.
-func (u *Updater) Run(ctx context.Context, executable string) {
-	if u.state.Current == "dev" {
-		return
-	}
+// Run checks now and then every few hours until an update is installed or
+// ctx ends.
+func (u *Updater) Run(ctx context.Context) {
 	for {
-		wait := checkEvery
-		installed, err := u.check(ctx, executable)
-		u.mu.Lock()
-		if err != nil {
-			u.state.Error = err.Error()
-			wait = retryAfter
-			log.Printf("update check: %v", err)
-		} else {
-			u.state.Error = ""
-		}
-		if installed != "" {
-			u.state.Installed = installed
-		}
-		u.mu.Unlock()
-		if installed != "" || ctx.Err() != nil {
+		installed, err := u.CheckNow(ctx)
+		if installed != "" || ctx.Err() != nil || u.state.Current == "dev" {
 			return
+		}
+		wait := checkEvery
+		if err != nil {
+			wait = retryAfter
 		}
 		select {
 		case <-ctx.Done():
@@ -121,7 +115,35 @@ func (u *Updater) Run(ctx context.Context, executable string) {
 	}
 }
 
-func (u *Updater) check(ctx context.Context, executable string) (string, error) {
+// CheckNow looks for a newer release straight away and installs it. It
+// answers the version now on disk waiting for a restart, which may be one an
+// earlier check installed, or "" when there is nothing newer.
+func (u *Updater) CheckNow(ctx context.Context) (string, error) {
+	if u.state.Current == "dev" {
+		return "", nil
+	}
+	u.checking.Lock()
+	defer u.checking.Unlock()
+	if installed := u.State().Installed; installed != "" {
+		return installed, nil
+	}
+
+	installed, err := u.install(ctx)
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if err != nil {
+		u.state.Error = err.Error()
+		log.Printf("update check: %v", err)
+	} else {
+		u.state.Error = ""
+	}
+	if installed != "" {
+		u.state.Installed = installed
+	}
+	return installed, err
+}
+
+func (u *Updater) install(ctx context.Context) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 
@@ -139,7 +161,7 @@ func (u *Updater) check(ctx context.Context, executable string) (string, error) 
 	if err != nil || !found || latest.LessOrEqual(u.state.Current) {
 		return "", err
 	}
-	if err := updater.UpdateTo(ctx, latest, executable); err != nil {
+	if err := updater.UpdateTo(ctx, latest, u.executable); err != nil {
 		return "", err
 	}
 	log.Printf("installed %s; restart to use it", latest.Version())

@@ -4,9 +4,11 @@ import { createRoot } from 'react-dom/client';
 import { useAppEvents } from '../useAppEvents';
 import {
   LABELS,
-  MAX_CHANNELS,
+  MAX_PER_LIST,
   NUMBER_RANGES,
   parseChannel,
+  parseKickChat,
+  parseYouTubeChat,
   type OverlayOptions,
   type Settings,
   type WatchersSnapshot,
@@ -35,23 +37,79 @@ const NUMBERS: { name: NumberField; label: string; hint: string }[] = [
   { name: 'inset', label: 'Edge inset %', hint: 'Kept clear at every edge so nothing is cropped.' },
 ];
 
-function channelsText(settings: Settings): string {
-  return settings.channels.map((channel) => `${channel.platform}/${channel.id}`).join('\n');
+/** The three lists as the setup page writes them: one entry per line. */
+interface Lists {
+  embeds: string;
+  kickChats: string;
+  youtubeChats: string;
+}
+
+function listsText(settings: Settings): Lists {
+  return {
+    embeds: settings.embeds.map((embed) => `${embed.platform}/${embed.id}`).join('\n'),
+    kickChats: settings.kickChats.join('\n'),
+    youtubeChats: settings.youtubeChats.join('\n'),
+  };
+}
+
+function lines(text: string): string[] {
+  return text.split('\n').map((line) => line.trim()).filter(Boolean);
+}
+
+/** A YouTube handle with whether something is live on it. */
+function withLive(name: string, entry: string, snapshot: WatchersSnapshot): string {
+  if (!(entry in snapshot.liveVideos)) return name;
+  return snapshot.liveVideos[entry] ? `${name} (live)` : `${name} (not live)`;
 }
 
 function chatStatus(snapshot: WatchersSnapshot | null, reachable: boolean): string {
   if (!reachable) return 'The app is not running. Start it again and this page reconnects.';
-  if (!snapshot?.channels.length) return 'Choose an embed to start.';
-  const where = snapshot.channels
-    .map((channel) => {
-      const name = `${channel.platform}/${channel.id}`;
-      if (!(channel.id in snapshot.liveVideos)) return name;
-      return snapshot.liveVideos[channel.id] ? `${name} (live)` : `${name} (not live)`;
-    })
-    .join(', ');
-  if (!snapshot.connected) return `Connecting to destiny.gg chat for ${where}…`;
+  if (!snapshot) return 'Connecting…';
+  const followed = [
+    ...snapshot.embeds.map((embed) => withLive(`${embed.platform}/${embed.id} on destiny.gg`, embed.id, snapshot)),
+    ...snapshot.kickChats.map((slug) => `Kick chat ${slug}`),
+    ...snapshot.youtubeChats.map((entry) => withLive(`YouTube chat ${entry}`, entry, snapshot)),
+  ];
+  if (followed.length === 0) return 'Choose an embed or a chat to start.';
+  if (snapshot.embeds.length > 0 && !snapshot.connected) {
+    return `Connecting to destiny.gg chat… Following ${followed.join(', ')}.`;
+  }
   const people = snapshot.chatCount === 1 ? '1 person' : `${snapshot.chatCount} people`;
-  return `Connected. ${people} in chat on ${where}.`;
+  return `${people} watching. Following ${followed.join(', ')}.`;
+}
+
+/** One list of entries, one per line. */
+function EntryList({
+  title,
+  label,
+  value,
+  placeholder,
+  hint,
+  onChange,
+}: {
+  title: string;
+  label: string;
+  value: string;
+  placeholder: string;
+  hint: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <section>
+      <h2>{title}</h2>
+      <label>
+        {label}
+        <textarea
+          value={value}
+          rows={Math.min(MAX_PER_LIST, Math.max(2, value.split('\n').length + 1))}
+          placeholder={placeholder}
+          spellCheck={false}
+          onChange={(event) => onChange(event.currentTarget.value)}
+        />
+      </label>
+      <p className="hint">{hint}</p>
+    </section>
+  );
 }
 
 interface UpdateState {
@@ -123,8 +181,7 @@ function Preview() {
 function SetupPage() {
   const { settings, snapshot, reachable } = useAppEvents();
   const update = useUpdateState();
-  const [channels, setChannels] = useState('');
-  const [platformChats, setPlatformChats] = useState(true);
+  const [lists, setLists] = useState<Lists>({ embeds: '', kickChats: '', youtubeChats: '' });
   const [overlay, setOverlay] = useState<OverlayOptions | null>(null);
   const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
   const [copied, setCopied] = useState(false);
@@ -132,8 +189,7 @@ function SetupPage() {
   // Fill the form once, from what is saved. Later pushes are this page's own saves.
   useEffect(() => {
     if (settings && overlay === null) {
-      setChannels(channelsText(settings));
-      setPlatformChats(settings.platformChats);
+      setLists(listsText(settings));
       setOverlay(settings.overlay);
     }
   }, [settings, overlay]);
@@ -143,31 +199,43 @@ function SetupPage() {
   async function save(event: FormEvent) {
     event.preventDefault();
     if (!overlay) return;
-    const lines = channels.split('\n').map((line) => line.trim()).filter(Boolean);
-    const unreadable = lines.find((line) => !parseChannel(line));
-    if (unreadable) {
-      setMessage({
-        text: `“${unreadable}” isn't an embed. Write each as platform/name, such as kick/destiny, or paste a destiny.gg bigscreen link.`,
-        error: true,
-      });
-      return;
+    const checks = [
+      { entries: lines(lists.embeds), parse: parseChannel, what: 'an embed', how: 'platform/name, such as kick/destiny' },
+      { entries: lines(lists.kickChats), parse: parseKickChat, what: 'a Kick channel', how: 'a channel name, such as destiny' },
+      {
+        entries: lines(lists.youtubeChats),
+        parse: parseYouTubeChat,
+        what: 'a YouTube chat',
+        how: 'a handle such as @destiny, or a video id',
+      },
+    ];
+    for (const { entries, parse, what, how } of checks) {
+      const unreadable = entries.find((entry) => !parse(entry));
+      if (unreadable) {
+        setMessage({ text: `“${unreadable}” isn't ${what}. Write each as ${how}, or paste a link.`, error: true });
+        return;
+      }
+      if (entries.length > MAX_PER_LIST) {
+        setMessage({ text: `Follow at most ${MAX_PER_LIST} of each.`, error: true });
+        return;
+      }
     }
-    if (lines.length > MAX_CHANNELS) {
-      setMessage({ text: `Follow at most ${MAX_CHANNELS} embeds.`, error: true });
-      return;
-    }
-    const parsed = lines.map((line) => parseChannel(line)!);
+    const next: Settings = {
+      embeds: lines(lists.embeds).map((entry) => parseChannel(entry)!),
+      kickChats: lines(lists.kickChats).map((entry) => parseKickChat(entry)!),
+      youtubeChats: lines(lists.youtubeChats).map((entry) => parseYouTubeChat(entry)!),
+      overlay,
+    };
     const response = await fetch('/api/settings', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ channels: parsed, platformChats, overlay } satisfies Settings),
+      body: JSON.stringify(next),
     }).catch(() => null);
     if (!response?.ok) {
       setMessage({ text: response ? await response.text() : 'The app is not answering.', error: true });
       return;
     }
-    const saved = (await response.json()) as Settings;
-    setChannels(channelsText(saved));
+    setLists(listsText((await response.json()) as Settings));
     setMessage({ text: 'Saved. Open overlays update straight away.', error: false });
   }
 
@@ -212,32 +280,30 @@ function SetupPage() {
       </section>
 
       <form onSubmit={save}>
-        <section>
-          <h2>Embeds</h2>
-          <label>
-            Whose watchers to draw, one embed per line
-            <textarea
-              value={channels}
-              rows={Math.min(MAX_CHANNELS, Math.max(2, channels.split('\n').length + 1))}
-              placeholder="kick/destiny"
-              spellCheck={false}
-              onChange={(event) => setChannels(event.currentTarget.value)}
-            />
-          </label>
-          <p className="hint">
-            Each as platform/name: kick/destiny, youtube/@destiny (follows whatever that channel has
-            live) or youtube/VIDEO_ID. A destiny.gg bigscreen link, or a Kick or YouTube link, works
-            too. Several embeds are drawn together in one overlay.
-          </p>
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={platformChats}
-              onChange={(event) => setPlatformChats(event.currentTarget.checked)}
-            />
-            Also draw people talking in a Kick or YouTube embed's own chat
-          </label>
-        </section>
+        <EntryList
+          title="destiny.gg embeds"
+          label="Everyone in destiny.gg chat watching these embeds, one per line"
+          value={lists.embeds}
+          placeholder="kick/destiny"
+          hint="Each as platform/name: kick/destiny, youtube/@destiny (follows whatever that channel has live) or youtube/VIDEO_ID. A destiny.gg bigscreen link works too."
+          onChange={(embeds) => setLists({ ...lists, embeds })}
+        />
+        <EntryList
+          title="Kick chats"
+          label="Everyone talking in these Kick channels' chat, one per line"
+          value={lists.kickChats}
+          placeholder="destiny"
+          hint="A channel name, or a kick.com link."
+          onChange={(kickChats) => setLists({ ...lists, kickChats })}
+        />
+        <EntryList
+          title="YouTube chats"
+          label="Everyone talking in these YouTube chats, one per line"
+          value={lists.youtubeChats}
+          placeholder="@destiny"
+          hint="A channel handle such as @destiny, which follows whatever that channel has live, or a video id or link. Everything above is drawn together in one overlay."
+          onChange={(youtubeChats) => setLists({ ...lists, youtubeChats })}
+        />
 
         <section>
           <h2>Overlay</h2>

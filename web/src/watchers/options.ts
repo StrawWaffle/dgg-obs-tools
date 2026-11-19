@@ -33,9 +33,10 @@ export interface Watcher {
 }
 
 export interface WatchersSnapshot {
-  /** The embeds followed, drawn together. */
-  channels: Channel[];
-  /** For each followed YouTube channel, the live stream found on it, or "". */
+  embeds: Channel[];
+  kickChats: string[];
+  youtubeChats: string[];
+  /** For each followed YouTube channel handle, the live stream found on it, or "". */
   liveVideos: Record<string, string>;
   /** Everyone on them, which may be more than `watchers` carries. */
   chatCount: number;
@@ -82,13 +83,20 @@ export interface OverlayOptions {
   marks: 'on' | 'off';
 }
 
-/** How many embeds one overlay can follow; the app enforces the same limit. */
-export const MAX_CHANNELS = 10;
+/** How many embeds, or chats on one platform, an overlay follows; the app enforces the same. */
+export const MAX_PER_LIST = 10;
 
+/**
+ * What is followed. The three are independent: an embed can be followed
+ * without its stream's chat, and a Kick or YouTube chat without an embed.
+ */
 export interface Settings {
-  channels: Channel[];
-  /** Whether a Kick or YouTube embed brings the people talking in that stream's own chat. */
-  platformChats: boolean;
+  /** destiny.gg embeds, whose watchers destiny.gg chat names. */
+  embeds: Channel[];
+  /** Kick channels whose chat is read. */
+  kickChats: string[];
+  /** YouTube chats: a handle such as @destiny, followed from stream to stream, or a video id. */
+  youtubeChats: string[];
   overlay: OverlayOptions;
 }
 
@@ -177,4 +185,26 @@ function channelFromLink(text: string): Channel | null {
     if (path[0]?.startsWith('@')) return { platform: 'youtube', id: path[0].toLowerCase() };
   }
   return null;
+}
+
+/** A Kick chat: `destiny`, `kick/destiny` or a kick.com link. */
+export function parseKickChat(input: string): string | null {
+  const text = input.trim();
+  const fromLink = channelFromLink(text);
+  if (fromLink) return fromLink.platform === 'kick' ? fromLink.id : null;
+  const slug = text.replace(/^kick\//i, '').toLowerCase();
+  return /^[a-z0-9_-]{1,40}$/.test(slug) ? slug : null;
+}
+
+/**
+ * A YouTube chat: a channel handle (`@destiny`), a video id, `youtube/...`
+ * with either, or a YouTube link.
+ */
+export function parseYouTubeChat(input: string): string | null {
+  const text = input.trim();
+  const fromLink = channelFromLink(text);
+  if (fromLink) return fromLink.platform === 'youtube' ? fromLink.id : null;
+  const entry = text.replace(/^youtube\//i, '');
+  if (VIDEO_ID.test(entry)) return entry;
+  return /^@[\w.-]{3,30}$/.test(entry) ? entry.toLowerCase() : null;
 }

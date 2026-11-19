@@ -1,10 +1,10 @@
 // Package watchers keeps track of who is watching the followed embeds and
 // hands that to every open overlay.
 //
-// Three sources feed it. destiny.gg chat names everyone with a followed embed
-// open, talking or not. Kick and YouTube chat name the people talking in a
-// followed stream's own chat, who are watching it too; they are kept from
-// their messages, since neither platform lists who is in a chat.
+// Three independent sources feed it. destiny.gg chat names everyone with a
+// followed embed open, talking or not. Kick and YouTube chat name the people
+// talking in a followed stream's own chat, who are watching it too; they are
+// kept from their messages, since neither platform lists who is in a chat.
 package watchers
 
 import (
@@ -49,8 +49,10 @@ const (
 // Snapshot is what an overlay draws from. Every field of it is already public
 // in the chats it comes from.
 type Snapshot struct {
-	Channels []dgg.Channel `json:"channels"`
-	// For each followed YouTube channel, the live stream found on it, or "".
+	Embeds       []dgg.Channel `json:"embeds"`
+	KickChats    []string      `json:"kickChats"`
+	YouTubeChats []string      `json:"youtubeChats"`
+	// For each followed YouTube channel handle, the live stream found on it, or "".
 	LiveVideos   map[string]string `json:"liveVideos"`
 	ChatCount    int               `json:"chatCount"`
 	Watchers     []chat.Watcher    `json:"watchers"`
@@ -110,7 +112,7 @@ func New(settingsPath string) *Tracker {
 // names a YouTube embed by its video.
 func (t *Tracker) dggChannels() []dgg.Channel {
 	var channels []dgg.Channel
-	for _, channel := range t.settings.Channels {
+	for _, channel := range t.settings.Embeds {
 		if channel.Platform == chat.YouTube && !youtube.IsVideoID(channel.ID) {
 			video := t.live[channel.ID]
 			if video == "" {
@@ -193,7 +195,7 @@ func (t *Tracker) gate(ctx context.Context) {
 	if len(t.subscribers) > 0 {
 		t.lastSeen = time.Now()
 	}
-	wanted := len(t.settings.Channels) > 0 && time.Since(t.lastSeen) < idleGrace
+	wanted := !t.settings.Empty() && time.Since(t.lastSeen) < idleGrace
 	if !wanted {
 		if t.socket != nil || t.stopOthers != nil {
 			t.closeAll()
@@ -201,7 +203,7 @@ func (t *Tracker) gate(ctx context.Context) {
 		}
 		return
 	}
-	if t.socket == nil {
+	if t.socket == nil && len(t.settings.Embeds) > 0 {
 		t.openDGG(ctx)
 	}
 	if t.stopOthers == nil {
@@ -218,34 +220,34 @@ func (t *Tracker) openDGG(ctx context.Context) {
 }
 
 // openOthers starts Kick chat and a source for each YouTube entry. A YouTube
-// channel is looked up even when its chat is not read, because destiny.gg's
-// embed for it is named by the live video.
+// handle among the embeds is looked up even when its chat is not read,
+// because destiny.gg names that embed by the live video.
 func (t *Tracker) openOthers(ctx context.Context) {
 	othersCtx, cancel := context.WithCancel(ctx)
 	t.stopOthers = cancel
-	readChats := t.settings.PlatformChats
 
-	var kickChannels []string
-	for _, channel := range t.settings.Channels {
-		switch channel.Platform {
-		case chat.Kick:
-			kickChannels = append(kickChannels, channel.ID)
-		case chat.YouTube:
-			if !readChats && youtube.IsVideoID(channel.ID) {
-				continue
-			}
-			entry := channel.ID
-			source := &youtube.Source{
-				Entry:      entry,
-				LookupOnly: !readChats,
-				OnLive:     func(video string) { t.onLive(othersCtx, entry, video) },
-				OnMessage:  func(m youtube.Message) { t.onYouTube(othersCtx, m) },
-			}
-			go source.Run(othersCtx)
+	readChat := map[string]bool{}
+	for _, entry := range t.settings.YouTubeChats {
+		readChat[entry] = true
+	}
+	entries := slices.Clone(t.settings.YouTubeChats)
+	for _, embed := range t.settings.Embeds {
+		if embed.Platform == chat.YouTube && !youtube.IsVideoID(embed.ID) && !slices.Contains(entries, embed.ID) {
+			entries = append(entries, embed.ID)
 		}
 	}
-	if readChats && len(kickChannels) > 0 {
-		client := &kick.Client{Channels: kickChannels, OnMessage: func(m kick.Message) { t.onKick(othersCtx, m) }}
+	for _, entry := range entries {
+		source := &youtube.Source{
+			Entry:      entry,
+			LookupOnly: !readChat[entry],
+			OnLive:     func(video string) { t.onLive(othersCtx, entry, video) },
+			OnMessage:  func(m youtube.Message) { t.onYouTube(othersCtx, m) },
+		}
+		go source.Run(othersCtx)
+	}
+
+	if len(t.settings.KickChats) > 0 {
+		client := &kick.Client{Channels: t.settings.KickChats, OnMessage: func(m kick.Message) { t.onKick(othersCtx, m) }}
 		go client.Run(othersCtx)
 	}
 }
@@ -350,13 +352,20 @@ func (t *Tracker) forgetQuietSpeakers() {
 
 func (t *Tracker) snapshot() Snapshot {
 	snapshot := Snapshot{
-		Channels:   t.settings.Channels,
-		LiveVideos: map[string]string{},
-		Watchers:   []chat.Watcher{},
+		Embeds:       t.settings.Embeds,
+		KickChats:    t.settings.KickChats,
+		YouTubeChats: t.settings.YouTubeChats,
+		LiveVideos:   map[string]string{},
+		Watchers:     []chat.Watcher{},
 	}
-	for _, channel := range t.settings.Channels {
-		if channel.Platform == chat.YouTube && !youtube.IsVideoID(channel.ID) {
-			snapshot.LiveVideos[channel.ID] = t.live[channel.ID]
+	for _, embed := range t.settings.Embeds {
+		if embed.Platform == chat.YouTube && !youtube.IsVideoID(embed.ID) {
+			snapshot.LiveVideos[embed.ID] = t.live[embed.ID]
+		}
+	}
+	for _, entry := range t.settings.YouTubeChats {
+		if !youtube.IsVideoID(entry) {
+			snapshot.LiveVideos[entry] = t.live[entry]
 		}
 	}
 	if t.catalogue != nil {
@@ -446,7 +455,9 @@ func (t *Tracker) SetSettings(next settings.Settings) error {
 	defer t.mu.Unlock()
 	previous := t.settings
 	t.settings = next
-	if !slices.Equal(previous.Channels, next.Channels) || previous.PlatformChats != next.PlatformChats {
+	if !slices.Equal(previous.Embeds, next.Embeds) ||
+		!slices.Equal(previous.KickChats, next.KickChats) ||
+		!slices.Equal(previous.YouTubeChats, next.YouTubeChats) {
 		// Everything follows the new list from scratch; the next tick reopens
 		// what is wanted. Kick and YouTube speakers from embeds no longer
 		// followed go with it.

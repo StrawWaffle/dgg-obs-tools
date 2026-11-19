@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseChannel } from './options';
+import { parseChannel, parseKickChat, parseYouTubeChat } from './options';
 
 describe('reading an embed out of what somebody pastes', () => {
   it('takes platform/name, lowercased', () => {
@@ -25,5 +25,22 @@ describe('reading an embed out of what somebody pastes', () => {
   it('refuses what it cannot place', () => {
     expect(parseChannel('destiny')).toBeNull();
     expect(parseChannel('vimeo/123')).toBeNull();
+  });
+});
+
+describe('reading a Kick or YouTube chat', () => {
+  it('takes a Kick name, with or without the platform, or a link', () => {
+    expect(parseKickChat('Destiny')).toBe('destiny');
+    expect(parseKickChat('kick/destiny')).toBe('destiny');
+    expect(parseKickChat('https://kick.com/destiny')).toBe('destiny');
+    expect(parseKickChat('https://www.youtube.com/@destiny')).toBeNull();
+  });
+
+  it('takes a YouTube handle, a video id, or a link', () => {
+    expect(parseYouTubeChat('@Destiny')).toBe('@destiny');
+    expect(parseYouTubeChat('youtube/@destiny')).toBe('@destiny');
+    expect(parseYouTubeChat('P7Xv5DdqL0k')).toBe('P7Xv5DdqL0k');
+    expect(parseYouTubeChat('https://www.youtube.com/watch?v=P7Xv5DdqL0k')).toBe('P7Xv5DdqL0k');
+    expect(parseYouTubeChat('destiny')).toBeNull();
   });
 });

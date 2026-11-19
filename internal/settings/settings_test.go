@@ -1,41 +1,52 @@
 package settings
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/StrawWaffle/dgg-obs-tools/internal/dgg"
 )
 
-func TestValidateKeepsYouTubeVideoCase(t *testing.T) {
+func TestValidateTidiesEachList(t *testing.T) {
 	s := Default()
-	s.Channels = []dgg.Channel{
+	s.Embeds = []dgg.Channel{
 		{Platform: "kick", ID: "Destiny"},
 		{Platform: "kick", ID: "destiny"},
 		{Platform: "youtube", ID: "P7Xv5DdqL0k"},
 		{Platform: "youtube", ID: "@Destiny"},
 	}
+	s.KickChats = []string{"Destiny", "destiny", "anythingelse"}
+	s.YouTubeChats = []string{"@Destiny", "P7Xv5DdqL0k"}
 	if err := s.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	want := []dgg.Channel{
+	wantEmbeds := []dgg.Channel{
 		{Platform: "kick", ID: "destiny"},
 		{Platform: "youtube", ID: "P7Xv5DdqL0k"},
 		{Platform: "youtube", ID: "@destiny"},
 	}
-	if len(s.Channels) != len(want) {
-		t.Fatalf("got %v", s.Channels)
+	if !slices.Equal(s.Embeds, wantEmbeds) {
+		t.Fatalf("embeds %v", s.Embeds)
 	}
-	for i := range want {
-		if s.Channels[i] != want[i] {
-			t.Fatalf("got %v", s.Channels)
-		}
+	if !slices.Equal(s.KickChats, []string{"destiny", "anythingelse"}) {
+		t.Fatalf("kick %v", s.KickChats)
+	}
+	// A video id keeps its case, because YouTube's ids are case sensitive.
+	if !slices.Equal(s.YouTubeChats, []string{"@destiny", "P7Xv5DdqL0k"}) {
+		t.Fatalf("youtube %v", s.YouTubeChats)
 	}
 }
 
-func TestValidateRefusesAYouTubeNameThatIsNeither(t *testing.T) {
-	s := Default()
-	s.Channels = []dgg.Channel{{Platform: "youtube", ID: "destiny"}}
-	if s.Validate() == nil {
-		t.Fatal("accepted a bare name for YouTube")
+func TestValidateRefusesWhatItCannotPlace(t *testing.T) {
+	for _, mutate := range []func(*Settings){
+		func(s *Settings) { s.Embeds = []dgg.Channel{{Platform: "youtube", ID: "destiny"}} },
+		func(s *Settings) { s.KickChats = []string{"kick.com/destiny"} },
+		func(s *Settings) { s.YouTubeChats = []string{"destiny"} },
+	} {
+		s := Default()
+		mutate(&s)
+		if s.Validate() == nil {
+			t.Errorf("accepted %+v", s)
+		}
 	}
 }

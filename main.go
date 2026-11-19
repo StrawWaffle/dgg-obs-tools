@@ -79,8 +79,8 @@ func main() {
 	}
 
 	update.RemoveOld(executable)
-	updater := update.New(version)
-	go updater.Run(ctx, executable)
+	updater := update.New(version, executable)
+	go updater.Run(ctx)
 
 	// Everything that stops the app goes through the tray, which owns the main
 	// goroutine: Quit in its menu, the setup page's Quit button, Ctrl+C in a
@@ -119,7 +119,11 @@ func main() {
 
 	tray.Run(tray.Options{
 		OpenSetup: func() { openBrowser(setupURL) },
-		Update:    updater.State,
+		Version:   version,
+		Update: func() (string, error) {
+			return updater.CheckNow(ctx)
+		},
+		Installed: func() string { return updater.State().Installed },
 		Restart:   restart,
 		Quit:      tray.Stop,
 	})

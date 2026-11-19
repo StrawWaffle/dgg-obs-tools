@@ -48,22 +48,31 @@ type Overlay struct {
 	Marks string `json:"marks"`
 }
 
-// Settings is everything the setup page saves.
+// Settings is everything the setup page saves. The three sources are
+// independent: an embed can be followed without its stream's chat, and a
+// Kick or YouTube chat without any embed.
 type Settings struct {
-	// The embeds whose watchers are drawn, together. Empty before any is chosen.
-	Channels []dgg.Channel `json:"channels"`
-	// Whether a Kick or YouTube embed brings the people talking in that
-	// stream's own chat, beside destiny.gg's watchers of it.
-	PlatformChats bool    `json:"platformChats"`
-	Overlay       Overlay `json:"overlay"`
+	// destiny.gg embeds, whose watchers are named by destiny.gg chat.
+	Embeds []dgg.Channel `json:"embeds"`
+	// Kick channels whose chat is read, by slug.
+	KickChats []string `json:"kickChats"`
+	// YouTube chats to read: a channel handle such as "@destiny", followed
+	// from stream to stream, or one video id.
+	YouTubeChats []string `json:"youtubeChats"`
+	Overlay      Overlay  `json:"overlay"`
 }
 
 // Default is a fresh install.
 func Default() Settings {
-	return Settings{Channels: []dgg.Channel{}, PlatformChats: true, Overlay: Overlay{
+	return Settings{Embeds: []dgg.Channel{}, KickChats: []string{}, YouTubeChats: []string{}, Overlay: Overlay{
 		Show: "speakers", Window: 10, Max: 12, Layout: "float", Names: "under",
 		Enter: "fade", Motion: "drift", Color: "flair", Speed: 100, Size: 100, Roam: 100, Inset: 4, Marks: "on",
 	}}
+}
+
+// Empty reports whether nothing at all is followed.
+func (s Settings) Empty() bool {
+	return len(s.Embeds) == 0 && len(s.KickChats) == 0 && len(s.YouTubeChats) == 0
 }
 
 func oneOf(field, value string, allowed []string) error {
@@ -80,39 +89,91 @@ func within(field string, value, low, high int) error {
 	return nil
 }
 
-var youtubeHandle = regexp.MustCompile(`^@[\w.-]{3,30}$`)
+var (
+	youtubeHandle = regexp.MustCompile(`^@[\w.-]{3,30}$`)
+	kickSlug      = regexp.MustCompile(`^[a-z0-9_-]{1,40}$`)
+)
 
-// MaxChannels is how many embeds one overlay follows. Enough for a co-stream
-// or a watch party; more would only be a wall of faces.
-const MaxChannels = 10
+// MaxPerList is how many embeds, or chats of one platform, an overlay
+// follows. Enough for a co-stream or a watch party; more would only be a
+// wall of faces.
+const MaxPerList = 10
 
-// Validate checks every field, lowercases channel ids and drops repeats.
-func (s *Settings) Validate() error {
-	if len(s.Channels) > MaxChannels {
-		return fmt.Errorf("at most %d embeds", MaxChannels)
+// youtubeEntry checks a YouTube handle or video id. A video id is case
+// sensitive; a handle is not, and is kept lowercase so it compares.
+func youtubeEntry(entry string) (string, error) {
+	if youtube.IsVideoID(entry) {
+		return entry, nil
 	}
-	channels := make([]dgg.Channel, 0, len(s.Channels))
-	for _, channel := range s.Channels {
-		channel.ID = strings.TrimSpace(channel.ID)
-		if err := oneOf("platform", channel.Platform, Platforms); err != nil {
+	entry = strings.ToLower(entry)
+	if !youtubeHandle.MatchString(entry) {
+		return "", fmt.Errorf("%q is neither a YouTube video id nor a channel handle such as @destiny", entry)
+	}
+	return entry, nil
+}
+
+// unique keeps the first of each, in order.
+func unique[T comparable](items []T) []T {
+	kept := make([]T, 0, len(items))
+	for _, item := range items {
+		if !slices.Contains(kept, item) {
+			kept = append(kept, item)
+		}
+	}
+	return kept
+}
+
+// Validate checks every field, lowercases names that are not case sensitive
+// and drops repeats.
+func (s *Settings) Validate() error {
+	if len(s.Embeds) > MaxPerList || len(s.KickChats) > MaxPerList || len(s.YouTubeChats) > MaxPerList {
+		return fmt.Errorf("at most %d embeds, and %d chats on each platform", MaxPerList, MaxPerList)
+	}
+
+	embeds := make([]dgg.Channel, 0, len(s.Embeds))
+	for _, embed := range s.Embeds {
+		embed.ID = strings.TrimSpace(embed.ID)
+		if err := oneOf("platform", embed.Platform, Platforms); err != nil {
 			return err
 		}
-		if channel.ID == "" || len(channel.ID) > 120 {
+		if embed.ID == "" || len(embed.ID) > 120 {
 			return errors.New("each embed needs a name of up to 120 characters")
 		}
-		// A YouTube video id is case sensitive; everything else, a YouTube
-		// handle included, is not, and is kept lowercase so it compares.
-		if channel.Platform != "youtube" || !youtube.IsVideoID(channel.ID) {
-			channel.ID = strings.ToLower(channel.ID)
+		if embed.Platform == "youtube" {
+			// destiny.gg names a YouTube embed by its video; a handle is
+			// looked up for whatever that channel has live.
+			id, err := youtubeEntry(embed.ID)
+			if err != nil {
+				return err
+			}
+			embed.ID = id
+		} else {
+			embed.ID = strings.ToLower(embed.ID)
 		}
-		if channel.Platform == "youtube" && !youtube.IsVideoID(channel.ID) && !youtubeHandle.MatchString(channel.ID) {
-			return fmt.Errorf("%q is neither a YouTube video id nor a channel handle such as @destiny", channel.ID)
-		}
-		if !slices.Contains(channels, channel) {
-			channels = append(channels, channel)
-		}
+		embeds = append(embeds, embed)
 	}
-	s.Channels = channels
+	s.Embeds = unique(embeds)
+
+	kicks := make([]string, 0, len(s.KickChats))
+	for _, slug := range s.KickChats {
+		slug = strings.ToLower(strings.TrimSpace(slug))
+		if !kickSlug.MatchString(slug) {
+			return fmt.Errorf("%q is not a Kick channel name", slug)
+		}
+		kicks = append(kicks, slug)
+	}
+	s.KickChats = unique(kicks)
+
+	videos := make([]string, 0, len(s.YouTubeChats))
+	for _, entry := range s.YouTubeChats {
+		entry, err := youtubeEntry(strings.TrimSpace(entry))
+		if err != nil {
+			return err
+		}
+		videos = append(videos, entry)
+	}
+	s.YouTubeChats = unique(videos)
+
 	o := s.Overlay
 	return errors.Join(
 		oneOf("show", o.Show, shows),
