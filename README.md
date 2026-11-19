@@ -14,6 +14,26 @@ entrances and names.
 Everything it shows is already public in destiny.gg chat. It connects
 anonymously and needs no login.
 
+## Download
+
+Get the file for your system from the
+[latest release](https://github.com/StrawWaffle/dgg-obs-tools/releases/latest).
+There's nothing to install: put it anywhere and run it.
+
+- **Windows:** `dgg-obs-tools_windows_amd64.exe`. The file isn't signed, so the
+  first time Windows may say it protected your PC: click **More info**, then
+  **Run anyway**.
+- **macOS:** `dgg-obs-tools_darwin_arm64.tar.gz` (Apple silicon) or
+  `_darwin_amd64` (Intel). Unpack it, then the first time right-click the file
+  and choose **Open**, because it isn't signed.
+- **Linux:** `dgg-obs-tools_linux_amd64.tar.gz` (or `_arm64`). Unpack and run.
+
+It keeps itself up to date. A few times a day it checks for a new release,
+verifies it against the release's checksums and puts it in place of its own
+file. It never restarts by itself, so an update can't interrupt a stream: the
+setup page offers a **Restart** button, and otherwise the next launch uses the
+new version.
+
 ## Setup
 
 1. Run `dgg-obs-tools`. It opens its setup page in your browser at
@@ -55,3 +75,8 @@ go build -trimpath -ldflags "-s -w" -o dgg-obs-tools .
 to a copy of the program running on the default port.
 
 Tests: `go test ./...` and `npm test` in `web/`.
+
+To publish a release, push a tag such as `v0.2.0`. The release workflow builds
+every platform with `scripts/build-release.sh` and attaches the files and
+`checksums.txt`. Copies built from source report version `dev` and never
+update themselves.

@@ -74,6 +74,7 @@ func main() {
 		log.Fatalf("could not find this program's own file: %v", err)
 	}
 
+	update.RemoveOld(executable)
 	updater := update.New(version)
 	go updater.Run(ctx, executable)
 

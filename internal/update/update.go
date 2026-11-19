@@ -5,6 +5,8 @@ package update
 import (
 	"context"
 	"log"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -38,6 +40,15 @@ type Updater struct {
 // New starts with the running version. "dev" builds never update.
 func New(current string) *Updater {
 	return &Updater{state: State{Current: current}}
+}
+
+// RemoveOld deletes the copy an earlier update left beside executable. Windows
+// cannot delete a running file, so the update renames it to a hidden
+// `.<name>.old` instead, and only a later start can remove it. A failure is
+// ignored: the previous copy may still be exiting, and the next start tries again.
+func RemoveOld(executable string) {
+	dir, name := filepath.Split(executable)
+	_ = os.Remove(filepath.Join(dir, "."+name+".old"))
 }
 
 // State returns the current state.
