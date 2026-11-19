@@ -1,0 +1,26 @@
+name: Build release files
+description: Tests the app and builds the release files for some targets into dist/.
+
+inputs:
+  targets:
+    description: Space-separated GOOS/GOARCH pairs, as scripts/build-release.sh takes them.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v5
+      with:
+        node-version: 24
+        cache: npm
+        cache-dependency-path: web/package-lock.json
+    - uses: actions/setup-go@v6
+      with:
+        go-version-file: go.mod
+    - run: npm ci && npm test && npm run build
+      shell: bash
+      working-directory: web
+    - run: go vet ./... && go test ./...
+      shell: bash
+    - run: scripts/build-release.sh "$GITHUB_REF_NAME" ${{ inputs.targets }}
+      shell: bash

@@ -2,38 +2,39 @@ name: Release
 
 # Push a tag such as v0.2.0 to publish a release. Running copies find it within
 # a few hours and install it.
+#
+# The release is published as soon as the Windows and Linux files are built.
+# The Mac files are added to it afterwards, because GitHub's Mac machines can
+# keep a build queued for a long time and nobody else should wait for them.
+# Until they arrive, Mac copies simply see no newer release for their system.
 on:
   push:
     tags: ['v*']
 
 jobs:
   build:
-    strategy:
-      matrix:
-        include:
-          - runner: ubuntu-latest
-            targets: windows/amd64 windows/arm64 linux/amd64 linux/arm64
-          # The menu bar icon needs cgo and Cocoa, so Mac builds are made on a Mac.
-          - runner: macos-latest
-            targets: darwin/amd64 darwin/arm64
-    runs-on: ${{ matrix.runner }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: ./.github/actions/build
         with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-      - run: npm ci && npm test && npm run build
-        working-directory: web
-      - run: go vet ./... && go test ./...
-      - run: scripts/build-release.sh "$GITHUB_REF_NAME" ${{ matrix.targets }}
+          targets: windows/amd64 windows/arm64 linux/amd64 linux/arm64
       - uses: actions/upload-artifact@v5
         with:
-          name: build-${{ matrix.runner }}
+          name: release
+          path: dist/*
+
+  # The menu bar icon needs cgo and Cocoa, so Mac builds are made on a Mac.
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/build
+        with:
+          targets: darwin/amd64 darwin/arm64
+      - uses: actions/upload-artifact@v5
+        with:
+          name: release-macos
           path: dist/*
 
   publish:
@@ -45,9 +46,27 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/download-artifact@v5
         with:
+          name: release
           path: dist
-          merge-multiple: true
       - run: cd dist && sha256sum -- * > checksums.txt
       - run: gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --notes-file scripts/release-notes.md --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}
+
+  # Adds the Mac files to the published release, and their lines to its
+  # checksums list, which the updater checks every download against.
+  add-macos:
+    needs: [build-macos, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: release-macos
+          path: macos
+      - run: gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --pattern checksums.txt
+      - run: (cd macos && sha256sum -- *) >> checksums.txt
+      - run: gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" macos/* checksums.txt --clobber
