@@ -44,8 +44,8 @@ Options on the setup page:
 - what happens to a message a moderator removes or a user banned: hidden,
   blurred (hover to read, in a browser) or kept
 - destiny.gg's flair badges beside names, and starring out swear words and slurs
-- a run of messages from one person under their name once, the way destiny.gg's
-  chat shows them
+- a run of messages from one person under their name once: the lines after the
+  first start with a dim `>` instead of repeating the name
 - size, text shadow, platform icons, shortened links, and how many messages
   stay on screen
 
