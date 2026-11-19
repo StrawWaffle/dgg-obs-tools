@@ -63,10 +63,9 @@ func (u chatUser) subTier() int {
 	return u.Subscription.Tier
 }
 
-func (u chatUser) watches(channel Channel) bool {
+func (u chatUser) watchesAny(channels map[Channel]bool) bool {
 	return u.Watching != nil &&
-		u.Watching.Platform == channel.Platform &&
-		strings.ToLower(u.Watching.ID) == channel.ID
+		channels[Channel{Platform: u.Watching.Platform, ID: strings.ToLower(u.Watching.ID)}]
 }
 
 // Watcher is one person in chat with the channel's embed open.
@@ -91,23 +90,29 @@ func optional(value string) *string {
 // EmoteReader finds the emote in a message, or "".
 type EmoteReader func(text string, subTier int) string
 
-// Roster is who is watching one channel, kept from the chat event stream.
+// Roster is who is watching any of a set of channels, kept from the chat event
+// stream. Every chat event names what its user is watching, so one connection
+// answers for any number of channels.
 //
 // NAMES seeds it on every connect; JOIN, MSG and UPDATEUSER set one person;
 // QUIT and USERSDELTA remove. When somebody last spoke survives a NAMES rebuild,
 // because a reconnect does not mean nobody has talked.
 type Roster struct {
-	channel   Channel
+	channels  map[Channel]bool
 	readEmote EmoteReader
 	watchers  map[string]Watcher
 }
 
-// NewRoster starts an empty roster for one channel.
-func NewRoster(channel Channel, readEmote EmoteReader) *Roster {
-	return &Roster{channel: channel, readEmote: readEmote, watchers: map[string]Watcher{}}
+// NewRoster starts an empty roster for the given channels.
+func NewRoster(channels []Channel, readEmote EmoteReader) *Roster {
+	set := make(map[Channel]bool, len(channels))
+	for _, channel := range channels {
+		set[channel] = true
+	}
+	return &Roster{channels: set, readEmote: readEmote, watchers: map[string]Watcher{}}
 }
 
-// Len is how many people are on the channel.
+// Len is how many people are on the channels.
 func (r *Roster) Len() int { return len(r.watchers) }
 
 // List puts whoever spoke most recently first, then everyone else by name.
@@ -161,7 +166,7 @@ func (r *Roster) applyNames(data json.RawMessage) {
 	}
 	rebuilt := make(map[string]Watcher, len(r.watchers))
 	for _, user := range names.Users {
-		if user.Nick == "" || !user.watches(r.channel) {
+		if user.Nick == "" || !user.watchesAny(r.channels) {
 			continue
 		}
 		key := strings.ToLower(user.Nick)
@@ -203,7 +208,7 @@ func (r *Roster) setUser(user chatUser, spokeAt *time.Time) {
 		return
 	}
 	key := strings.ToLower(user.Nick)
-	if !user.watches(r.channel) {
+	if !user.watchesAny(r.channels) {
 		delete(r.watchers, key)
 		return
 	}

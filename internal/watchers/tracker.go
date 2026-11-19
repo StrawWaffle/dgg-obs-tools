@@ -6,6 +6,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -34,7 +35,7 @@ const (
 // Snapshot is what an overlay draws from. Every field of it is already public
 // in destiny.gg chat.
 type Snapshot struct {
-	Channel      *dgg.Channel  `json:"channel"`
+	Channels     []dgg.Channel `json:"channels"`
 	ChatCount    int           `json:"chatCount"`
 	Watchers     []dgg.Watcher `json:"watchers"`
 	EmoteVersion *string       `json:"emoteVersion"`
@@ -47,7 +48,8 @@ type Event struct {
 	Data any
 }
 
-// Tracker is the one chat connection and roster for the app.
+// Tracker is the one chat connection and roster for the app. New embeds need
+// a new connection, because chat only sends its roster on connect.
 type Tracker struct {
 	settingsPath string
 	client       *http.Client
@@ -76,10 +78,10 @@ func New(settingsPath string) *Tracker {
 }
 
 func (t *Tracker) newRoster() *dgg.Roster {
-	if t.settings.Channel == nil {
+	if len(t.settings.Channels) == 0 {
 		return nil
 	}
-	return dgg.NewRoster(*t.settings.Channel, func(text string, tier int) string {
+	return dgg.NewRoster(t.settings.Channels, func(text string, tier int) string {
 		// Called with t.mu held, from onFrame.
 		return t.catalogue.LastEmote(text, tier)
 	})
@@ -143,7 +145,7 @@ func (t *Tracker) gate(ctx context.Context) {
 	if len(t.subscribers) > 0 {
 		t.lastSeen = time.Now()
 	}
-	wanted := t.settings.Channel != nil && time.Since(t.lastSeen) < idleGrace
+	wanted := len(t.settings.Channels) > 0 && time.Since(t.lastSeen) < idleGrace
 	switch {
 	case wanted && t.socket == nil:
 		socketCtx, cancel := context.WithCancel(ctx)
@@ -185,7 +187,7 @@ func (t *Tracker) onFrame(ctx context.Context, socket *dgg.Socket, raw string) {
 }
 
 func (t *Tracker) snapshot() Snapshot {
-	snapshot := Snapshot{Channel: t.settings.Channel, Watchers: []dgg.Watcher{}}
+	snapshot := Snapshot{Channels: t.settings.Channels, Watchers: []dgg.Watcher{}}
 	if t.catalogue != nil {
 		snapshot.EmoteVersion = &t.catalogue.Version
 	}
@@ -248,13 +250,13 @@ func (t *Tracker) SetSettings(next settings.Settings) error {
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	previous := t.settings.Channel
+	previous := t.settings.Channels
 	t.settings = next
-	if !sameChannel(previous, next.Channel) {
+	if !slices.Equal(previous, next.Channels) {
 		t.roster = t.newRoster()
-		// The roster only arrives on connect, so a new channel needs a new connection.
+		// The roster only arrives on connect, so new embeds need a new connection.
 		if t.socket != nil {
-			if next.Channel == nil {
+			if len(next.Channels) == 0 {
 				t.closeChat()
 			} else {
 				t.socket.Reconnect()
@@ -264,11 +266,4 @@ func (t *Tracker) SetSettings(next settings.Settings) error {
 	t.publish(Event{Type: "settings", Data: t.settings})
 	t.publish(Event{Type: "snapshot", Data: t.snapshot()})
 	return nil
-}
-
-func sameChannel(a, b *dgg.Channel) bool {
-	if a == nil || b == nil {
-		return a == b
-	}
-	return *a == *b
 }

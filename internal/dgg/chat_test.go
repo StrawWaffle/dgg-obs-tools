@@ -41,7 +41,7 @@ func testCatalogue(t *testing.T) *Catalogue {
 }
 
 func TestRosterKeepsOnlyTheChannel(t *testing.T) {
-	roster := NewRoster(dggjams, nil)
+	roster := NewRoster([]Channel{dggjams}, nil)
 	roster.Apply(frame(t, `NAMES {"users":[
 		{"nick":"Anpan","features":["subscriber","flair13"],"watching":{"platform":"kick","id":"dggJams"}},
 		{"nick":"Other","features":[],"watching":{"platform":"kick","id":"destiny"}},
@@ -58,8 +58,24 @@ func TestRosterKeepsOnlyTheChannel(t *testing.T) {
 	}
 }
 
+func TestRosterFollowsSeveralChannels(t *testing.T) {
+	roster := NewRoster([]Channel{dggjams, {Platform: "youtube", ID: "abc123"}}, nil)
+	now := time.Now()
+	roster.Apply(frame(t, `JOIN {"nick":"A","watching":{"platform":"kick","id":"dggjams"}}`), now)
+	roster.Apply(frame(t, `JOIN {"nick":"B","watching":{"platform":"youtube","id":"ABC123"}}`), now)
+	roster.Apply(frame(t, `JOIN {"nick":"C","watching":{"platform":"kick","id":"destiny"}}`), now)
+	if nicks(roster.List()) != "A,B" {
+		t.Fatalf("got %q", nicks(roster.List()))
+	}
+	// Switching between two followed embeds keeps them on.
+	roster.Apply(frame(t, `MSG {"nick":"A","data":"hi","watching":{"platform":"youtube","id":"abc123"}}`), now)
+	if roster.Len() != 2 {
+		t.Fatalf("after switch: %q", nicks(roster.List()))
+	}
+}
+
 func TestRosterFollowsJoinsQuitsAndSwitches(t *testing.T) {
-	roster := NewRoster(dggjams, nil)
+	roster := NewRoster([]Channel{dggjams}, nil)
 	now := time.Now()
 	roster.Apply(frame(t, `JOIN {"nick":"A","watching":{"platform":"kick","id":"dggjams"}}`), now)
 	roster.Apply(frame(t, `JOIN {"nick":"B","watching":{"platform":"kick","id":"dggjams"}}`), now)
@@ -81,7 +97,7 @@ func TestRosterFollowsJoinsQuitsAndSwitches(t *testing.T) {
 
 func TestRosterOrdersBySpeakingAndKeepsItAcrossNames(t *testing.T) {
 	catalogue := testCatalogue(t)
-	roster := NewRoster(dggjams, catalogue.LastEmote)
+	roster := NewRoster([]Channel{dggjams}, catalogue.LastEmote)
 	start := time.Now()
 	join := `{"nick":"%s","watching":{"platform":"kick","id":"dggjams"}}`
 	for _, nick := range []string{"Quiet", "First", "Second"} {
@@ -112,7 +128,7 @@ func TestRosterOrdersBySpeakingAndKeepsItAcrossNames(t *testing.T) {
 }
 
 func TestRosterReplaysHistory(t *testing.T) {
-	roster := NewRoster(dggjams, nil)
+	roster := NewRoster([]Channel{dggjams}, nil)
 	roster.Apply(frame(t, `HISTORY ["MSG {\"nick\":\"Old\",\"data\":\"hey\",\"timestamp\":1700000000000,\"watching\":{\"platform\":\"kick\",\"id\":\"dggjams\"}}"]`), time.Now())
 	list := roster.List()
 	if nicks(list) != "Old" || list[0].LastSpokeAt == nil || list[0].LastSpokeAt.UnixMilli() != 1700000000000 {

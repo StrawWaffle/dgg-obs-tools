@@ -6,12 +6,17 @@ on:
   push:
     tags: ['v*']
 
-permissions:
-  contents: write
-
 jobs:
-  release:
-    runs-on: ubuntu-latest
+  build:
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            targets: windows/amd64 windows/arm64 linux/amd64 linux/arm64
+          # The menu bar icon needs cgo and Cocoa, so Mac builds are made on a Mac.
+          - runner: macos-latest
+            targets: darwin/amd64 darwin/arm64
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -25,7 +30,24 @@ jobs:
       - run: npm ci && npm test && npm run build
         working-directory: web
       - run: go vet ./... && go test ./...
-      - run: scripts/build-release.sh "$GITHUB_REF_NAME"
+      - run: scripts/build-release.sh "$GITHUB_REF_NAME" ${{ matrix.targets }}
+      - uses: actions/upload-artifact@v5
+        with:
+          name: build-${{ matrix.runner }}
+          path: dist/*
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
+        with:
+          path: dist
+          merge-multiple: true
+      - run: cd dist && sha256sum -- * > checksums.txt
       - run: gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --notes-file scripts/release-notes.md --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}

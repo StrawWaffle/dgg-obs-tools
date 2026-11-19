@@ -45,14 +45,14 @@ type Overlay struct {
 
 // Settings is everything the setup page saves.
 type Settings struct {
-	// The embed whose watchers are drawn, or nil before one is chosen.
-	Channel *dgg.Channel `json:"channel"`
-	Overlay Overlay      `json:"overlay"`
+	// The embeds whose watchers are drawn, together. Empty before any is chosen.
+	Channels []dgg.Channel `json:"channels"`
+	Overlay  Overlay       `json:"overlay"`
 }
 
 // Default is a fresh install.
 func Default() Settings {
-	return Settings{Overlay: Overlay{
+	return Settings{Channels: []dgg.Channel{}, Overlay: Overlay{
 		Show: "speakers", Window: 10, Max: 12, Layout: "float", Names: "under",
 		Enter: "fade", Motion: "drift", Color: "flair", Speed: 100, Size: 100, Roam: 100, Inset: 4,
 	}}
@@ -72,17 +72,29 @@ func within(field string, value, low, high int) error {
 	return nil
 }
 
-// Validate checks every field and lowercases the channel id.
+// MaxChannels is how many embeds one overlay follows. Enough for a co-stream
+// or a watch party; more would only be a wall of faces.
+const MaxChannels = 10
+
+// Validate checks every field, lowercases channel ids and drops repeats.
 func (s *Settings) Validate() error {
-	if s.Channel != nil {
-		s.Channel.ID = strings.ToLower(strings.TrimSpace(s.Channel.ID))
-		if err := oneOf("platform", s.Channel.Platform, Platforms); err != nil {
+	if len(s.Channels) > MaxChannels {
+		return fmt.Errorf("at most %d embeds", MaxChannels)
+	}
+	channels := make([]dgg.Channel, 0, len(s.Channels))
+	for _, channel := range s.Channels {
+		channel.ID = strings.ToLower(strings.TrimSpace(channel.ID))
+		if err := oneOf("platform", channel.Platform, Platforms); err != nil {
 			return err
 		}
-		if s.Channel.ID == "" || len(s.Channel.ID) > 120 {
-			return errors.New("channel must be a name of up to 120 characters")
+		if channel.ID == "" || len(channel.ID) > 120 {
+			return errors.New("each embed needs a name of up to 120 characters")
+		}
+		if !slices.Contains(channels, channel) {
+			channels = append(channels, channel)
 		}
 	}
+	s.Channels = channels
 	o := s.Overlay
 	return errors.Join(
 		oneOf("show", o.Show, shows),

@@ -25,9 +25,9 @@ type Status struct {
 const AppName = "dgg-obs-tools"
 
 // New builds the handler. pages is the built web app: index.html (setup),
-// watchers.html (the overlay) and their assets. restart is called once the
-// response to a restart request has gone out.
-func New(tracker *watchers.Tracker, updater *update.Updater, restart func(), pages fs.FS) http.Handler {
+// watchers.html (the overlay) and their assets. restart and quit are called
+// once the response to their request has gone out.
+func New(tracker *watchers.Tracker, updater *update.Updater, restart, quit func(), pages fs.FS) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /api/status", func(w http.ResponseWriter, r *http.Request) {
@@ -43,6 +43,16 @@ func New(tracker *watchers.Tracker, updater *update.Updater, restart func(), pag
 		}
 		w.WriteHeader(http.StatusAccepted)
 		go restart()
+	})
+
+	// For when there is no tray to quit from: some Linux desktops show none.
+	mux.HandleFunc("POST /api/quit", func(w http.ResponseWriter, r *http.Request) {
+		if !isJSON(r) {
+			http.Error(w, "expected application/json", http.StatusUnsupportedMediaType)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+		go quit()
 	})
 
 	mux.HandleFunc("GET /api/settings", func(w http.ResponseWriter, r *http.Request) {

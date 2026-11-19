@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { useAppEvents } from '../useAppEvents';
 import {
   LABELS,
+  MAX_CHANNELS,
   NUMBER_RANGES,
   parseChannel,
   type OverlayOptions,
@@ -33,14 +34,14 @@ const NUMBERS: { name: NumberField; label: string; hint: string }[] = [
   { name: 'inset', label: 'Edge inset %', hint: 'Kept clear at every edge so nothing is cropped.' },
 ];
 
-function channelText(settings: Settings): string {
-  return settings.channel ? `${settings.channel.platform}/${settings.channel.id}` : '';
+function channelsText(settings: Settings): string {
+  return settings.channels.map((channel) => `${channel.platform}/${channel.id}`).join('\n');
 }
 
 function chatStatus(snapshot: WatchersSnapshot | null, reachable: boolean): string {
   if (!reachable) return 'The app is not running. Start it again and this page reconnects.';
-  if (!snapshot?.channel) return 'Choose an embed to start.';
-  const where = `${snapshot.channel.platform}/${snapshot.channel.id}`;
+  if (!snapshot?.channels.length) return 'Choose an embed to start.';
+  const where = snapshot.channels.map((channel) => `${channel.platform}/${channel.id}`).join(', ');
   if (!snapshot.connected) return `Connecting to destiny.gg chat for ${where}…`;
   const people = snapshot.chatCount === 1 ? '1 person' : `${snapshot.chatCount} people`;
   return `Connected. ${people} in chat on ${where}.`;
@@ -115,7 +116,7 @@ function Preview() {
 function SetupPage() {
   const { settings, snapshot, reachable } = useAppEvents();
   const update = useUpdateState();
-  const [channel, setChannel] = useState('');
+  const [channels, setChannels] = useState('');
   const [overlay, setOverlay] = useState<OverlayOptions | null>(null);
   const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
   const [copied, setCopied] = useState(false);
@@ -123,7 +124,7 @@ function SetupPage() {
   // Fill the form once, from what is saved. Later pushes are this page's own saves.
   useEffect(() => {
     if (settings && overlay === null) {
-      setChannel(channelText(settings));
+      setChannels(channelsText(settings));
       setOverlay(settings.overlay);
     }
   }, [settings, overlay]);
@@ -133,27 +134,38 @@ function SetupPage() {
   async function save(event: FormEvent) {
     event.preventDefault();
     if (!overlay) return;
-    const trimmed = channel.trim();
-    const parsed = trimmed === '' ? null : parseChannel(trimmed);
-    if (trimmed !== '' && !parsed) {
+    const lines = channels.split('\n').map((line) => line.trim()).filter(Boolean);
+    const unreadable = lines.find((line) => !parseChannel(line));
+    if (unreadable) {
       setMessage({
-        text: 'Write the embed as platform/name, such as kick/destiny, or paste a destiny.gg bigscreen link.',
+        text: `“${unreadable}” isn't an embed. Write each as platform/name, such as kick/destiny, or paste a destiny.gg bigscreen link.`,
         error: true,
       });
       return;
     }
+    if (lines.length > MAX_CHANNELS) {
+      setMessage({ text: `Follow at most ${MAX_CHANNELS} embeds.`, error: true });
+      return;
+    }
+    const parsed = lines.map((line) => parseChannel(line)!);
     const response = await fetch('/api/settings', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ channel: parsed, overlay } satisfies Settings),
+      body: JSON.stringify({ channels: parsed, overlay } satisfies Settings),
     }).catch(() => null);
     if (!response?.ok) {
       setMessage({ text: response ? await response.text() : 'The app is not answering.', error: true });
       return;
     }
     const saved = (await response.json()) as Settings;
-    setChannel(channelText(saved));
+    setChannels(channelsText(saved));
     setMessage({ text: 'Saved. Open overlays update straight away.', error: false });
+  }
+
+  async function quit() {
+    await fetch('/api/quit', { method: 'POST', headers: { 'Content-Type': 'application/json' } }).catch(
+      () => undefined,
+    );
   }
 
   async function copy() {
@@ -192,18 +204,21 @@ function SetupPage() {
 
       <form onSubmit={save}>
         <section>
-          <h2>Embed</h2>
+          <h2>Embeds</h2>
           <label>
-            Whose watchers to draw
-            <input
-              value={channel}
+            Whose watchers to draw, one embed per line
+            <textarea
+              value={channels}
+              rows={Math.min(MAX_CHANNELS, Math.max(2, channels.split('\n').length + 1))}
               placeholder="kick/destiny"
-              onChange={(event) => setChannel(event.currentTarget.value)}
+              spellCheck={false}
+              onChange={(event) => setChannels(event.currentTarget.value)}
             />
           </label>
           <p className="hint">
-            platform/name, such as kick/destiny or youtube/VIDEO_ID, or a link like
-            https://www.destiny.gg/bigscreen#kick/destiny.
+            Each as platform/name, such as kick/destiny or youtube/VIDEO_ID, or a link like
+            https://www.destiny.gg/bigscreen#kick/destiny. Several embeds are drawn together in one
+            overlay.
           </p>
         </section>
 
@@ -253,6 +268,18 @@ function SetupPage() {
       <section className="preview-section">
         <h2>Preview</h2>
         <Preview />
+      </section>
+
+      <section>
+        <h2>Running</h2>
+        <div className="row">
+          <button type="button" onClick={quit}>
+            Quit
+          </button>
+          <p className="hint inline">
+            The app sits in the system tray (the menu bar on a Mac). Quitting stops the overlays in OBS.
+          </p>
+        </div>
       </section>
     </main>
   );

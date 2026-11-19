@@ -1,6 +1,6 @@
 // dgg-obs-tools serves OBS browser sources that draw destiny.gg chat on
-// stream. Run it, open the setup page it prints, and paste the overlay URL
-// into an OBS browser source.
+// stream. Run it, and it opens its setup page and sits in the system tray;
+// paste the overlay URL from the setup page into an OBS browser source.
 package main
 
 import (
@@ -9,6 +9,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -18,11 +19,12 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/StrawWaffle/dgg-obs-tools/internal/server"
 	"github.com/StrawWaffle/dgg-obs-tools/internal/settings"
+	"github.com/StrawWaffle/dgg-obs-tools/internal/tray"
 	"github.com/StrawWaffle/dgg-obs-tools/internal/update"
 	"github.com/StrawWaffle/dgg-obs-tools/internal/watchers"
 	"github.com/StrawWaffle/dgg-obs-tools/web"
@@ -58,8 +60,10 @@ func main() {
 		log.Fatalf("no settings folder: %v", err)
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
+	logPath := logToFile(settingsPath)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	tracker := watchers.New(settingsPath)
 	go tracker.Run(ctx)
@@ -78,41 +82,73 @@ func main() {
 	updater := update.New(version)
 	go updater.Run(ctx, executable)
 
-	restarting := make(chan struct{})
-	var restartOnce sync.Once
-	restart := func() { restartOnce.Do(func() { close(restarting) }) }
+	// Everything that stops the app goes through the tray, which owns the main
+	// goroutine: Quit in its menu, the setup page's Quit button, Ctrl+C in a
+	// terminal, or a restart into an update.
+	var restarting atomic.Bool
+	restart := func() {
+		restarting.Store(true)
+		tray.Stop()
+	}
+	interrupts := make(chan os.Signal, 1)
+	signal.Notify(interrupts, os.Interrupt)
+	go func() {
+		<-interrupts
+		tray.Stop()
+	}()
 
 	httpServer := &http.Server{
-		Handler:           server.New(tracker, updater, restart, web.Pages()),
+		Handler:           server.New(tracker, updater, restart, tray.Stop, web.Pages()),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {
-		select {
-		case <-ctx.Done():
-		case <-restarting:
+		if err := httpServer.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatal(err)
 		}
-		shutdown, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		_ = httpServer.Shutdown(shutdown)
 	}()
 
-	fmt.Printf("dgg-obs-tools %s\n", version)
-	fmt.Println("Setup page:      ", setupURL)
+	fmt.Println("dgg-obs-tools", version)
+	fmt.Println("Setup page:        ", setupURL)
 	fmt.Println("OBS browser source:", setupURL+"watchers")
-	fmt.Println("Settings saved in:", settingsPath)
-	fmt.Println("Close this window to stop.")
+	fmt.Println("Settings saved in: ", settingsPath)
+	fmt.Println("Log:               ", logPath)
+	fmt.Println("It runs in the system tray; quit it from there.")
 	if !*noBrowser {
 		openBrowser(setupURL)
 	}
 
-	if err := httpServer.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Fatal(err)
-	}
-	select {
-	case <-restarting:
+	tray.Run(tray.Options{
+		OpenSetup: func() { openBrowser(setupURL) },
+		Update:    updater.State,
+		Restart:   restart,
+		Quit:      tray.Stop,
+	})
+
+	cancel()
+	shutdown, cancelShutdown := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancelShutdown()
+	_ = httpServer.Shutdown(shutdown)
+	if restarting.Load() {
 		relaunch(executable)
-	default:
 	}
+}
+
+// logToFile copies the log into a file beside the settings. A release build on
+// Windows has no console, so this is the only place a problem can be read.
+// The file is started fresh each launch, which keeps it small.
+func logToFile(settingsPath string) string {
+	path := filepath.Join(filepath.Dir(settingsPath), "dgg-obs-tools.log")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return ""
+	}
+	file, err := os.Create(path)
+	if err != nil {
+		return ""
+	}
+	// The file first: without a console, writing to stderr fails, and a
+	// MultiWriter stops at the first failure.
+	log.SetOutput(io.MultiWriter(file, os.Stderr))
+	return path
 }
 
 // relaunch starts the file on disk again, which after an update is the new
@@ -128,7 +164,7 @@ func relaunch(executable string) {
 	if err := command.Start(); err != nil {
 		log.Fatalf("could not restart: %v", err)
 	}
-	fmt.Println("Restarted as the updated version.")
+	log.Print("restarted as the updated version")
 }
 
 func alreadyRunning(address string) bool {

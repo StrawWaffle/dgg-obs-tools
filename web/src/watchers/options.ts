@@ -13,7 +13,7 @@ export interface Channel {
   id: string;
 }
 
-/** One person in destiny.gg chat with the chosen embed open. */
+/** One person in destiny.gg chat with one of the chosen embeds open. */
 export interface Watcher {
   nick: string;
   /** The flair their name is coloured by, resolved the way chat resolves it. */
@@ -25,8 +25,9 @@ export interface Watcher {
 }
 
 export interface WatchersSnapshot {
-  channel: Channel | null;
-  /** Everyone on the embed, which may be more than `watchers` carries. */
+  /** The embeds followed, drawn together. */
+  channels: Channel[];
+  /** Everyone on them, which may be more than `watchers` carries. */
   chatCount: number;
   /** Whoever spoke most recently first. */
   watchers: Watcher[];
@@ -69,8 +70,11 @@ export interface OverlayOptions {
   inset: number;
 }
 
+/** How many embeds one overlay can follow; the app enforces the same limit. */
+export const MAX_CHANNELS = 10;
+
 export interface Settings {
-  channel: Channel | null;
+  channels: Channel[];
   overlay: OverlayOptions;
 }
 
