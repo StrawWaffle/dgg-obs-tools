@@ -64,6 +64,9 @@ type Message struct {
 	Emote    string
 	EmoteURL string
 	At       time.Time
+	// Kick's id for the message, and the message itself, emotes split out.
+	ID    string
+	Parts []chat.Part
 }
 
 // Client follows the chat of some Kick channels over one connection.
@@ -71,6 +74,8 @@ type Client struct {
 	// Channel slugs, lowercase.
 	Channels  []string
 	OnMessage func(Message)
+	// OnRemove is told when a moderator deletes a message or bans somebody.
+	OnRemove func(chat.Removal)
 
 	http     http.Client
 	mu       sync.Mutex
@@ -238,6 +243,7 @@ type reply struct {
 }
 
 type chatMessage struct {
+	ID         string `json:"id"`
 	ChatroomID int64  `json:"chatroom_id"`
 	Content    string `json:"content"`
 	Type       string `json:"type"`
@@ -258,17 +264,47 @@ func (c *Client) handle(line []byte, rooms map[int64]string) error {
 	if r.Error != nil {
 		return fmt.Errorf("centrifugo %d: %s", r.Error.Code, r.Error.Message)
 	}
-	if r.Push == nil || r.Push.Pub == nil || r.Push.Pub.Data.Event != `App\Events\ChatMessageEvent` {
+	if r.Push == nil || r.Push.Pub == nil {
 		return nil
 	}
-	var m chatMessage
-	if json.Unmarshal([]byte(r.Push.Pub.Data.Data), &m) != nil {
-		return nil
-	}
-	if message, ok := toMessage(m, rooms); ok && c.OnMessage != nil {
-		c.OnMessage(message)
+	data := []byte(r.Push.Pub.Data.Data)
+	switch r.Push.Pub.Data.Event {
+	case `App\Events\ChatMessageEvent`:
+		var m chatMessage
+		if json.Unmarshal(data, &m) != nil {
+			return nil
+		}
+		if message, ok := toMessage(m, rooms); ok && c.OnMessage != nil {
+			c.OnMessage(message)
+		}
+	case `App\Events\MessageDeletedEvent`, `App\Events\UserBannedEvent`:
+		if removal, ok := toRemoval(r.Push.Pub.Data.Event, data); ok && c.OnRemove != nil {
+			c.OnRemove(removal)
+		}
 	}
 	return nil
+}
+
+// toRemoval reads a moderator deleting one message, or banning somebody.
+func toRemoval(event string, data []byte) (chat.Removal, bool) {
+	var payload struct {
+		Message struct {
+			ID string `json:"id"`
+		} `json:"message"`
+		User struct {
+			Username string `json:"username"`
+		} `json:"user"`
+	}
+	if json.Unmarshal(data, &payload) != nil {
+		return chat.Removal{}, false
+	}
+	if event == `App\Events\MessageDeletedEvent` && payload.Message.ID != "" {
+		return chat.Removal{Platform: chat.Kick, IDs: []string{"kick-" + payload.Message.ID}}, true
+	}
+	if event == `App\Events\UserBannedEvent` && payload.User.Username != "" {
+		return chat.Removal{Platform: chat.Kick, Nick: payload.User.Username}, true
+	}
+	return chat.Removal{}, false
 }
 
 var emoteTag = regexp.MustCompile(`\[emote:(\d+):([^\]\s]+)\]`)
@@ -282,12 +318,23 @@ func toMessage(m chatMessage, rooms map[int64]string) (Message, bool) {
 	if err != nil {
 		at = time.Now()
 	}
-	message := Message{Channel: slug, Nick: m.Sender.Username, Color: safeColor(m.Sender.Identity.Color), At: at.UTC()}
-	if found := emoteTag.FindAllStringSubmatch(m.Content, -1); len(found) > 0 {
-		last := found[len(found)-1]
-		message.Emote = last[2]
-		message.EmoteURL = "https://files.kick.com/emotes/" + last[1] + "/fullsize"
+	message := Message{
+		Channel: slug,
+		Nick:    m.Sender.Username,
+		Color:   safeColor(m.Sender.Identity.Color),
+		At:      at.UTC(),
+		ID:      "kick-" + m.ID,
 	}
+	last := 0
+	for _, found := range emoteTag.FindAllStringSubmatchIndex(m.Content, -1) {
+		message.Parts = append(message.Parts, chat.TextParts(m.Content[last:found[0]])...)
+		id, name := m.Content[found[2]:found[3]], m.Content[found[4]:found[5]]
+		message.Emote = name
+		message.EmoteURL = "https://files.kick.com/emotes/" + id + "/fullsize"
+		message.Parts = append(message.Parts, chat.Part{Emote: name, URL: message.EmoteURL})
+		last = found[1]
+	}
+	message.Parts = append(message.Parts, chat.TextParts(m.Content[last:])...)
 	return message, true
 }
 

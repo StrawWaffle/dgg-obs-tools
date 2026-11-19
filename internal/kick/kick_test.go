@@ -24,6 +24,20 @@ func TestToMessageTakesTheLastEmote(t *testing.T) {
 	if message.Emote != "collectiblesGoldenNAHH" || message.EmoteURL != "https://files.kick.com/emotes/5748004/fullsize" {
 		t.Fatalf("emote %q %q", message.Emote, message.EmoteURL)
 	}
+	if len(message.Parts) != 3 || message.Parts[0].Emote != "LULW" || message.Parts[1].Text != " no way " {
+		t.Fatalf("parts %+v", message.Parts)
+	}
+}
+
+func TestToRemoval(t *testing.T) {
+	deleted, ok := toRemoval(`App\Events\MessageDeletedEvent`, []byte(`{"id":"x","message":{"id":"61a41bb4"}}`))
+	if !ok || len(deleted.IDs) != 1 || deleted.IDs[0] != "kick-61a41bb4" {
+		t.Fatalf("deleted %+v", deleted)
+	}
+	banned, ok := toRemoval(`App\Events\UserBannedEvent`, []byte(`{"user":{"username":"Troll"},"banned_by":{"username":"Mod"}}`))
+	if !ok || banned.Nick != "Troll" {
+		t.Fatalf("banned %+v", banned)
+	}
 }
 
 func TestToMessageSkipsOtherRoomsAndBots(t *testing.T) {

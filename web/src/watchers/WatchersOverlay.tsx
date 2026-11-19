@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { spawnBody, stepBumpers, type BumperBody } from './bumperMotion';
+import { useEmoteStylesheetVersion } from '../emoteStylesheet';
+import { PlatformIcon } from '../platform';
 import { loopRepeatingAnimations } from './loopRepeating';
 import {
   DEFAULT_EMOTE,
@@ -342,23 +344,7 @@ function PictureEmote({ name, url }: { name: string; url: string }) {
   );
 }
 
-const MARKS: Record<string, string> = { kick: 'K', youtube: 'YT' };
 
-const EMOTE_STYLESHEET = 'https://r2cdn.destiny.gg/emotes/emotes.css';
-
-/**
- * Points the page's emote stylesheet at the catalogue the server last read, so
- * a browser source holding an old copy fetches the new one when emotes change.
- */
-function useEmoteStylesheetVersion(version: string | null): void {
-  useEffect(() => {
-    if (!version) return;
-    const link = document.getElementById('emote-stylesheet');
-    if (!(link instanceof HTMLLinkElement)) return;
-    const href = `${EMOTE_STYLESHEET}?v=${version}`;
-    if (link.href !== href) link.href = href;
-  }, [version]);
-}
 
 /**
  * The watchers overlay. It draws whatever snapshot and options it is given, so
@@ -468,10 +454,8 @@ export default function WatchersOverlay({
                 // chat shows; destiny.gg's come from the flair class instead.
                 style={watcher.color && options.color === 'flair' ? { color: watcher.color } : undefined}
               >
-                {options.marks === 'on' && MARKS[watcher.platform] && (
-                  <span className={`platform-mark platform-${watcher.platform}`}>
-                    {MARKS[watcher.platform]}
-                  </span>
+                {options.marks === 'on' && watcher.platform !== 'dgg' && (
+                  <PlatformIcon platform={watcher.platform} />
                 )}
                 {watcher.nick}
               </span>

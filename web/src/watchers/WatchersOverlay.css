@@ -442,23 +442,11 @@
 }
 
 /* Where somebody is talking from, when the source asks for it. */
-.platform-mark {
-  display: inline-block;
+.watcher-name .platform-icon {
+  width: 0.9em;
+  height: 0.9em;
   margin-right: 0.3em;
-  padding: 0 0.25em;
-  border-radius: 3px;
-  font-size: 0.75em;
-  line-height: 1.3;
-  text-shadow: none;
-  vertical-align: 0.1em;
-}
-
-.platform-kick {
-  background: #53fc18;
-  color: #0b0b0b;
-}
-
-.platform-youtube {
-  background: #ff0033;
-  color: #fff;
+  vertical-align: -0.05em;
+  /* Over live video the logo needs the same edge as the name beside it. */
+  filter: drop-shadow(0 0 2px #000);
 }

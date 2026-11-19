@@ -26,9 +26,12 @@
 - `internal/kick`, `internal/youtube`: anonymous Kick (Centrifugo) and YouTube
   (live chat polling) readers.
 - `internal/chat`: the watcher type and backoff they share.
-- `internal/watchers`: the tracker that feeds open pages.
+- `internal/watchers`: the tracker that holds the connections and feeds open
+  pages: snapshots of who is watching to overlays (`tracker.go`), messages and
+  removals to chat pages (`chatfeed.go`).
 - `internal/settings`: saved settings and their limits (mirrored in
   `web/src/watchers/options.ts`).
 - `internal/server`: routes, server-sent events, localhost guards.
-- `web/`: the setup page and the overlays (React, Vite), embedded into the
-  executable from `web/dist`.
+- `web/`: the setup page, the watchers overlay and the chat (React, Vite),
+  embedded into the executable from `web/dist`. `web/public/platform/` and
+  `web/src/platform.tsx` hold the platform icons.

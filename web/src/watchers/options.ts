@@ -98,6 +98,70 @@ export interface Settings {
   /** YouTube chats: a handle such as @destiny, followed from stream to stream, or a video id. */
   youtubeChats: string[];
   overlay: OverlayOptions;
+  chat: ChatOptions;
+}
+
+/** How the combined chat page draws. internal/settings/settings.go has the same shape and limits. */
+export interface ChatOptions {
+  /** Which destiny.gg messages show: all, only from people watching a followed embed, or none. */
+  dgg: 'all' | 'watching' | 'off';
+  kick: boolean;
+  youtube: boolean;
+  /** Percent of the standard size, text and emotes together. */
+  size: number;
+  shadow: 'none' | 'soft' | 'strong';
+  icons: 'on' | 'off';
+  /** Phrases that highlight a message, matched without case. */
+  highlights: string[];
+  /** Whether destiny.gg messages from people watching a followed embed stand out. */
+  highlightWatching: 'on' | 'off';
+  links: 'full' | 'short';
+  /** What happens to a message a moderator removes. */
+  removed: 'hide' | 'blur' | 'keep';
+  /** How many messages the page keeps. */
+  lines: number;
+}
+
+export const CHAT_SIZE_RANGE = { min: 50, max: 300 } as const;
+export const CHAT_LINES_RANGE = { min: 20, max: 300 } as const;
+
+export const CHAT_LABELS = {
+  dgg: { all: 'All of destiny.gg chat', watching: 'Only people watching the embeds', off: 'None' },
+  shadow: { none: 'None', soft: 'Soft', strong: 'Strong outline' },
+  icons: { on: 'Platform icons', off: 'No icons' },
+  highlightWatching: { on: 'Highlight embed watchers', off: "Don't highlight them" },
+  links: { short: 'Shortened', full: 'In full' },
+  removed: { hide: 'Hide them', blur: 'Blur them', keep: 'Keep showing them' },
+} as const;
+
+/** One piece of a message: text, an emote, or a link. */
+export interface MessagePart {
+  text?: string;
+  /** An emote's name. Without `url` it is a destiny.gg emote, drawn by its class. */
+  emote?: string;
+  url?: string;
+  link?: string;
+}
+
+/** One message from any of the followed chats. */
+export interface ChatMessage {
+  id: string;
+  platform: 'dgg' | 'kick' | 'youtube';
+  /** "destiny.gg", or the Kick channel or YouTube entry it was said in. */
+  source: string;
+  nick: string;
+  flair: string | null;
+  color: string | null;
+  at: string;
+  parts: MessagePart[];
+  /** A destiny.gg /me message. */
+  action?: boolean;
+  /** A destiny.gg message starting with ">". */
+  green?: boolean;
+  /** A destiny.gg sender with one of the followed embeds open. */
+  watching?: boolean;
+  /** Taken down by a moderator. */
+  removed?: boolean;
 }
 
 export const DEFAULT_OVERLAY_OPTIONS: OverlayOptions = {
@@ -143,7 +207,7 @@ export const LABELS = {
   enter: { fade: 'Fade', spin: 'Spin', slide: 'Slide', random: 'Mixed' },
   motion: { drift: 'Wander', bob: 'Bob up and down', orbit: 'Small circles', sway: 'Sway side to side' },
   color: { flair: 'Chat colours', white: 'Plain white' },
-  marks: { on: 'K / YT marks', off: 'No marks' },
+  marks: { on: 'Kick / YouTube icons', off: 'No icons' },
 } as const;
 
 /**

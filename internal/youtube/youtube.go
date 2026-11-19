@@ -47,6 +47,11 @@ type Message struct {
 	Emote    string
 	EmoteURL string
 	At       time.Time
+	// YouTube's id for the message, the sender's channel id, and the message
+	// itself with its emoji split out.
+	ID       string
+	AuthorID string
+	Parts    []chat.Part
 }
 
 // Source follows one entry: a channel handle such as "@destiny", whose
@@ -57,6 +62,9 @@ type Source struct {
 	OnMessage func(Message)
 	// OnLive is told the video being followed, or "" when there is none.
 	OnLive func(videoID string)
+	// OnRemove is told when a moderator removes a message or everything by
+	// one person.
+	OnRemove func(chat.Removal)
 	// LookupOnly finds the live video and reads no chat. destiny.gg names a
 	// YouTube embed by its video, so a channel is looked up either way.
 	LookupOnly bool
@@ -171,6 +179,9 @@ func (s *Source) followChat(ctx context.Context, video string) error {
 			if message, ok := toMessage(action, s.Entry, video); ok && s.OnMessage != nil {
 				s.OnMessage(message)
 			}
+			if removal, ok := toRemoval(action); ok && s.OnRemove != nil {
+				s.OnRemove(removal)
+			}
 		}
 		next, wait := nextContinuation(chat.Continuations)
 		if next == "" {
@@ -204,10 +215,40 @@ type action struct {
 			LiveChatTextMessageRenderer *textMessage `json:"liveChatTextMessageRenderer"`
 		} `json:"item"`
 	} `json:"addChatItemAction"`
+	// A moderator taking down one message, or everything by one person.
+	// YouTube has two spellings of each.
+	RemoveChatItemAction                 *byItem   `json:"removeChatItemAction"`
+	MarkChatItemAsDeletedAction          *byItem   `json:"markChatItemAsDeletedAction"`
+	RemoveChatItemByAuthorAction         *byAuthor `json:"removeChatItemByAuthorAction"`
+	MarkChatItemsByAuthorAsDeletedAction *byAuthor `json:"markChatItemsByAuthorAsDeletedAction"`
+}
+
+type byItem struct {
+	TargetItemID string `json:"targetItemId"`
+}
+
+type byAuthor struct {
+	ExternalChannelID string `json:"externalChannelId"`
+}
+
+func toRemoval(a action) (chat.Removal, bool) {
+	for _, item := range []*byItem{a.RemoveChatItemAction, a.MarkChatItemAsDeletedAction} {
+		if item != nil && item.TargetItemID != "" {
+			return chat.Removal{Platform: chat.YouTube, IDs: []string{"yt-" + item.TargetItemID}}, true
+		}
+	}
+	for _, author := range []*byAuthor{a.RemoveChatItemByAuthorAction, a.MarkChatItemsByAuthorAsDeletedAction} {
+		if author != nil && author.ExternalChannelID != "" {
+			return chat.Removal{Platform: chat.YouTube, AuthorID: author.ExternalChannelID}, true
+		}
+	}
+	return chat.Removal{}, false
 }
 
 type textMessage struct {
-	AuthorName struct {
+	ID                      string `json:"id"`
+	AuthorExternalChannelID string `json:"authorExternalChannelId"`
+	AuthorName              struct {
 		SimpleText string `json:"simpleText"`
 	} `json:"authorName"`
 	TimestampUsec string `json:"timestampUsec"`
@@ -247,12 +288,20 @@ func toMessage(a action, source, video string) (Message, bool) {
 	if nick == "" || chat.IsBot(nick) {
 		return Message{}, false
 	}
-	message := Message{Source: source, VideoID: video, Nick: nick, At: time.Now().UTC()}
+	message := Message{
+		Source:   source,
+		VideoID:  video,
+		Nick:     nick,
+		At:       time.Now().UTC(),
+		ID:       "yt-" + text.ID,
+		AuthorID: text.AuthorExternalChannelID,
+	}
 	if usec, err := strconv.ParseInt(text.TimestampUsec, 10, 64); err == nil {
 		message.At = time.UnixMicro(usec).UTC()
 	}
 	for _, run := range text.Message.Runs {
 		if run.Emoji == nil || len(run.Emoji.Image.Thumbnails) == 0 {
+			message.Parts = append(message.Parts, chat.TextParts(run.Text)...)
 			continue
 		}
 		thumbnails := run.Emoji.Image.Thumbnails
@@ -268,6 +317,7 @@ func toMessage(a action, source, video string) (Message, bool) {
 		if len(run.Emoji.Shortcuts) > 0 {
 			message.Emote = strings.Trim(run.Emoji.Shortcuts[0], ":")
 		}
+		message.Parts = append(message.Parts, chat.Part{Emote: message.Emote, URL: picture})
 	}
 	return message, true
 }

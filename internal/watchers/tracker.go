@@ -60,10 +60,26 @@ type Snapshot struct {
 	Connected    bool              `json:"connected"`
 }
 
-// Event is one message to an open page.
+// Event is one message to an open page: "settings" and "snapshot" for an
+// overlay; "settings", "emotes", "history", "message" and "remove" for a
+// chat page.
 type Event struct {
-	Type string // "snapshot" or "settings"
+	Type string
 	Data any
+}
+
+// pages is one kind of open page, with when one was last open.
+type pages struct {
+	open     map[chan Event]struct{}
+	lastSeen time.Time
+}
+
+// recent says whether a page of this kind is open, or was within idleGrace.
+func (p *pages) recent(now time.Time) bool {
+	if len(p.open) > 0 {
+		p.lastSeen = now
+	}
+	return now.Sub(p.lastSeen) < idleGrace
 }
 
 // Tracker holds the connections and the people they report.
@@ -88,9 +104,15 @@ type Tracker struct {
 	// Who has talked on Kick or YouTube, by chat.Watcher.Key.
 	speakers map[string]chat.Watcher
 
-	subscribers map[chan Event]struct{}
-	lastSeen    time.Time
-	dirty       bool
+	// The open pages, kept apart because they need different connections:
+	// an overlay needs destiny.gg chat only for its embeds, a chat page for
+	// everything said there.
+	overlays pages
+	chats    pages
+	dirty    bool
+
+	// The latest messages from every followed chat, oldest first.
+	history []chat.Message
 }
 
 // New loads the saved settings. Nothing connects until Run.
@@ -101,7 +123,8 @@ func New(settingsPath string) *Tracker {
 		settings:     settings.Load(settingsPath),
 		live:         map[string]string{},
 		speakers:     map[string]chat.Watcher{},
-		subscribers:  map[chan Event]struct{}{},
+		overlays:     pages{open: map[chan Event]struct{}{}},
+		chats:        pages{open: map[chan Event]struct{}{}},
 	}
 	t.roster = t.newRoster()
 	return t
@@ -156,7 +179,7 @@ func (t *Tracker) Run(ctx context.Context) {
 			t.forgetQuietSpeakers()
 			if t.dirty {
 				t.dirty = false
-				t.publish(Event{Type: "snapshot", Data: t.snapshot()})
+				t.publish(&t.overlays, Event{Type: "snapshot", Data: t.snapshot()})
 			}
 			t.mu.Unlock()
 		}
@@ -175,6 +198,7 @@ func (t *Tracker) refreshCatalogue(ctx context.Context) {
 			t.mu.Lock()
 			t.catalogue = catalogue
 			t.dirty = true
+			t.publish(&t.chats, Event{Type: "emotes", Data: t.emoteVersion()})
 			t.mu.Unlock()
 		}
 		wait := catalogueEvery
@@ -189,26 +213,42 @@ func (t *Tracker) refreshCatalogue(ctx context.Context) {
 	}
 }
 
-// gate opens the connections when there is something to follow and somebody
-// to draw for, and closes them once there has been nobody for idleGrace.
+// gate opens each connection while some open page needs it, and closes it
+// once none has for idleGrace.
 func (t *Tracker) gate(ctx context.Context) {
-	if len(t.subscribers) > 0 {
-		t.lastSeen = time.Now()
-	}
-	wanted := !t.settings.Empty() && time.Since(t.lastSeen) < idleGrace
-	if !wanted {
-		if t.socket != nil || t.stopOthers != nil {
-			t.closeAll()
-			t.dirty = true
-		}
-		return
-	}
-	if t.socket == nil && len(t.settings.Embeds) > 0 {
+	now := time.Now()
+	overlayOpen := t.overlays.recent(now)
+	chatOpen := t.chats.recent(now)
+
+	s := t.settings
+	wantDGG := (overlayOpen && len(s.Embeds) > 0) || (chatOpen && s.Chat.DGG != "off")
+	wantOthers := (overlayOpen || chatOpen) && (len(s.KickChats) > 0 || len(s.YouTubeChats) > 0 || t.youtubeEmbeds())
+
+	switch {
+	case wantDGG && t.socket == nil:
 		t.openDGG(ctx)
+	case !wantDGG && t.socket != nil:
+		t.closeDGG()
+		t.dirty = true
 	}
-	if t.stopOthers == nil {
+	switch {
+	case wantOthers && t.stopOthers == nil:
 		t.openOthers(ctx)
+	case !wantOthers && t.stopOthers != nil:
+		t.closeOthers()
+		t.dirty = true
 	}
+}
+
+// youtubeEmbeds says whether an embed is a YouTube handle, which needs a
+// YouTube lookup to find the video destiny.gg names it by.
+func (t *Tracker) youtubeEmbeds() bool {
+	for _, embed := range t.settings.Embeds {
+		if embed.Platform == chat.YouTube && !youtube.IsVideoID(embed.ID) {
+			return true
+		}
+	}
+	return false
 }
 
 func (t *Tracker) openDGG(ctx context.Context) {
@@ -242,26 +282,39 @@ func (t *Tracker) openOthers(ctx context.Context) {
 			LookupOnly: !readChat[entry],
 			OnLive:     func(video string) { t.onLive(othersCtx, entry, video) },
 			OnMessage:  func(m youtube.Message) { t.onYouTube(othersCtx, m) },
+			OnRemove:   func(r chat.Removal) { t.remove(othersCtx, r) },
 		}
 		go source.Run(othersCtx)
 	}
 
 	if len(t.settings.KickChats) > 0 {
-		client := &kick.Client{Channels: t.settings.KickChats, OnMessage: func(m kick.Message) { t.onKick(othersCtx, m) }}
+		client := &kick.Client{
+			Channels:  t.settings.KickChats,
+			OnMessage: func(m kick.Message) { t.onKick(othersCtx, m) },
+			OnRemove:  func(r chat.Removal) { t.remove(othersCtx, r) },
+		}
 		go client.Run(othersCtx)
 	}
 }
 
 func (t *Tracker) closeAll() {
+	t.closeDGG()
+	t.closeOthers()
+}
+
+func (t *Tracker) closeDGG() {
 	if t.stopSocket != nil {
 		t.stopSocket()
 	}
 	t.socket, t.stopSocket = nil, nil
+	t.roster = t.newRoster()
+}
+
+func (t *Tracker) closeOthers() {
 	if t.stopOthers != nil {
 		t.stopOthers()
 	}
 	t.stopOthers = nil
-	t.roster = t.newRoster()
 }
 
 func (t *Tracker) onFrame(ctx context.Context, socket *dgg.Socket, raw string) {
@@ -276,11 +329,14 @@ func (t *Tracker) onFrame(ctx context.Context, socket *dgg.Socket, raw string) {
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if t.socket != socket || t.roster == nil {
+	if t.socket != socket {
 		return
 	}
-	t.roster.Apply(frame, time.Now())
-	t.dirty = true
+	if t.roster != nil {
+		t.roster.Apply(frame, time.Now())
+		t.dirty = true
+	}
+	t.chatFrame(frame)
 }
 
 // onLive records the stream found on a YouTube channel. destiny.gg names that
@@ -300,6 +356,10 @@ func (t *Tracker) onLive(ctx context.Context, entry, video string) {
 }
 
 func (t *Tracker) onKick(ctx context.Context, m kick.Message) {
+	t.say(ctx, chat.Message{
+		ID: m.ID, Platform: chat.Kick, Source: m.Channel, Nick: m.Nick,
+		Color: chat.Optional(m.Color), At: m.At, Parts: m.Parts,
+	})
 	t.speak(ctx, chat.Watcher{
 		Nick:      m.Nick,
 		Platform:  chat.Kick,
@@ -310,6 +370,10 @@ func (t *Tracker) onKick(ctx context.Context, m kick.Message) {
 }
 
 func (t *Tracker) onYouTube(ctx context.Context, m youtube.Message) {
+	t.say(ctx, chat.Message{
+		ID: m.ID, Platform: chat.YouTube, Source: m.Source, Nick: m.Nick,
+		At: m.At, Parts: m.Parts, AuthorID: m.AuthorID,
+	})
 	t.speak(ctx, chat.Watcher{
 		Nick:      m.Nick,
 		Platform:  chat.YouTube,
@@ -348,6 +412,15 @@ func (t *Tracker) forgetQuietSpeakers() {
 			t.dirty = true
 		}
 	}
+}
+
+// emoteVersion is the emote list's fingerprint, which pages put on
+// destiny.gg's stylesheet URL. Called with t.mu held.
+func (t *Tracker) emoteVersion() *string {
+	if t.catalogue == nil {
+		return nil
+	}
+	return &t.catalogue.Version
 }
 
 func (t *Tracker) snapshot() Snapshot {
@@ -405,8 +478,8 @@ func sortBySpeaking(watchers []chat.Watcher) {
 	})
 }
 
-func (t *Tracker) publish(event Event) {
-	for subscriber := range t.subscribers {
+func (t *Tracker) publish(to *pages, event Event) {
+	for subscriber := range to.open {
 		select {
 		case subscriber <- event:
 		default:
@@ -415,21 +488,41 @@ func (t *Tracker) publish(event Event) {
 	}
 }
 
-// Subscribe registers an open page. It is sent the settings and a snapshot
+// Subscribe registers an open overlay. It is sent the settings and a snapshot
 // straight away, then every change. Call the returned function when it closes.
 func (t *Tracker) Subscribe() (<-chan Event, func()) {
-	events := make(chan Event, 4)
+	return t.subscribe(&t.overlays, func() []Event {
+		return []Event{{Type: "snapshot", Data: t.snapshot()}}
+	})
+}
+
+// SubscribeChat registers an open chat page. It is sent the settings and the
+// recent messages straight away, then each message and removal as it happens.
+func (t *Tracker) SubscribeChat() (<-chan Event, func()) {
+	return t.subscribe(&t.chats, func() []Event {
+		return []Event{
+			{Type: "emotes", Data: t.emoteVersion()},
+			{Type: "history", Data: slices.Clone(t.history)},
+		}
+	})
+}
+
+func (t *Tracker) subscribe(kind *pages, first func() []Event) (<-chan Event, func()) {
+	// Room for a burst: a busy chat can say several things between two reads.
+	events := make(chan Event, 64)
 	t.mu.Lock()
-	t.subscribers[events] = struct{}{}
-	t.lastSeen = time.Now()
+	kind.open[events] = struct{}{}
+	kind.lastSeen = time.Now()
 	events <- Event{Type: "settings", Data: t.settings}
-	events <- Event{Type: "snapshot", Data: t.snapshot()}
+	for _, event := range first() {
+		events <- event
+	}
 	t.mu.Unlock()
 
 	return events, func() {
 		t.mu.Lock()
-		delete(t.subscribers, events)
-		t.lastSeen = time.Now()
+		delete(kind.open, events)
+		kind.lastSeen = time.Now()
 		t.mu.Unlock()
 	}
 }
@@ -465,8 +558,10 @@ func (t *Tracker) SetSettings(next settings.Settings) error {
 		t.live = map[string]string{}
 		t.speakers = map[string]chat.Watcher{}
 		t.roster = t.newRoster()
+		t.forgetUnfollowedMessages()
 	}
-	t.publish(Event{Type: "settings", Data: t.settings})
-	t.publish(Event{Type: "snapshot", Data: t.snapshot()})
+	t.publish(&t.overlays, Event{Type: "settings", Data: t.settings})
+	t.publish(&t.overlays, Event{Type: "snapshot", Data: t.snapshot()})
+	t.publish(&t.chats, Event{Type: "settings", Data: t.settings})
 	return nil
 }

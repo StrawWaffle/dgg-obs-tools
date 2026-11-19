@@ -28,6 +28,27 @@ and needs no login or API key. Kick and YouTube chat are read the way their own
 web pages read them, which neither site documents, so a change on their side
 can break that part until an update follows.
 
+## Chat
+
+The same followed chats as one combined chat: destiny.gg, Kick and YouTube
+messages in a single column, with each platform's emotes, name colours and a
+small platform icon. Open it in a browser to read along, or add it to OBS,
+where it draws on a transparent background.
+
+Options on the setup page:
+
+- which destiny.gg messages show: all of chat, only people watching the
+  followed embeds, or none; and whether the Kick and YouTube chats show
+- highlighted phrases, and highlighting destiny.gg people who are watching
+  the followed embeds
+- what happens to a message a moderator removes or a user banned: hidden,
+  blurred (hover to read, in a browser) or kept
+- size, text shadow, platform icons, shortened links, and how many messages
+  stay on screen
+
+In a browser, scrolling up stops the chat moving so you can read back, and a
+button takes you to the newest messages again.
+
 ## Download
 
 Get the file for your system from the
@@ -59,8 +80,9 @@ new version.
    - **YouTube chats** as a handle (`@destiny`), a video id, or a YouTube link.
 
    Everything listed is drawn together in one overlay.
-3. In OBS add a **Browser** source with the URL `http://localhost:7341/watchers`,
-   sized 1920 × 1080.
+3. In OBS add a **Browser** source with the URL `http://localhost:7341/watchers`
+   for the watchers overlay (sized 1920 × 1080), or `http://localhost:7341/chat`
+   for the chat (any size you like).
 
 It runs in the system tray (the menu bar on a Mac), with no window of its
 own: click the icon to open the setup page. Right-click it to check for an

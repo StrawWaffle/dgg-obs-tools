@@ -179,3 +179,36 @@ func TestRetryDelayStaysInItsWindow(t *testing.T) {
 		t.Fatalf("cap %v", got)
 	}
 }
+
+func TestChatMessage(t *testing.T) {
+	catalogue := testCatalogue(t)
+	watching := func(c Channel) bool { return c == dggjams }
+	message, ok := ChatMessage(frame(t, `MSG {"nick":"Anpan","features":["subscriber"],"timestamp":1700000000000,"data":"/me catJAM PepoTurkey https://x.y","watching":{"platform":"kick","id":"DGGJams"},"subscription":{"tier":1}}`), catalogue, watching)
+	if !ok {
+		t.Fatal("message dropped")
+	}
+	if !message.Action || !message.Watching || message.Platform != "dgg" || *message.Flair != "subscriber" {
+		t.Fatalf("got %+v", message)
+	}
+	// PepoTurkey needs tier 2, so for a tier 1 subscriber it stays text, as in chat.
+	want := []chat.Part{{Emote: "catJAM"}, {Text: " PepoTurkey "}, {Link: "https://x.y"}}
+	if len(message.Parts) != len(want) {
+		t.Fatalf("parts %+v", message.Parts)
+	}
+	for i := range want {
+		if message.Parts[i] != want[i] {
+			t.Fatalf("parts %+v", message.Parts)
+		}
+	}
+	again, _ := ChatMessage(frame(t, `MSG {"nick":"Anpan","timestamp":1700000000000,"data":"/me catJAM PepoTurkey https://x.y"}`), catalogue, watching)
+	if again.ID != message.ID {
+		t.Fatal("the same message got two ids, so a reconnect's backlog would repeat it")
+	}
+}
+
+func TestChatRemoval(t *testing.T) {
+	removal, ok := ChatRemoval(frame(t, `MUTE {"nick":"Bot","data":"Troll","duration":600}`))
+	if !ok || removal.Nick != "Troll" || removal.Platform != "dgg" {
+		t.Fatalf("got %+v", removal)
+	}
+}

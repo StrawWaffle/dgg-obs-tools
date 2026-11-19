@@ -3,12 +3,16 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { createRoot } from 'react-dom/client';
 import { useAppEvents } from '../useAppEvents';
 import {
+  CHAT_LABELS,
+  CHAT_LINES_RANGE,
+  CHAT_SIZE_RANGE,
   LABELS,
   MAX_PER_LIST,
   NUMBER_RANGES,
   parseChannel,
   parseKickChat,
   parseYouTubeChat,
+  type ChatOptions,
   type OverlayOptions,
   type Settings,
   type WatchersSnapshot,
@@ -178,27 +182,133 @@ function Preview() {
   );
 }
 
+/** One OBS browser source address, with a button to copy it. */
+function SourceUrl({ title, path, hint, open }: { title: string; path: string; hint: string; open?: boolean }) {
+  const [copied, setCopied] = useState(false);
+  const url = `${window.location.origin}${path}`;
+
+  async function copy() {
+    await navigator.clipboard.writeText(url);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1_500);
+  }
+
+  return (
+    <div className="source">
+      <h3>{title}</h3>
+      <div className="row">
+        <input className="url" readOnly value={url} onFocus={(event) => event.currentTarget.select()} />
+        <button type="button" onClick={copy}>
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+        {open && (
+          <a className="button" href={path} target="_blank" rel="noreferrer">
+            Open
+          </a>
+        )}
+      </div>
+      <p className="hint">{hint}</p>
+    </div>
+  );
+}
+
+type ChatChoice = keyof typeof CHAT_LABELS;
+
+const CHAT_CHOICES: { name: ChatChoice; label: string }[] = [
+  { name: 'dgg', label: 'destiny.gg messages' },
+  { name: 'highlightWatching', label: 'Embed watchers' },
+  { name: 'icons', label: 'Platform icons' },
+  { name: 'shadow', label: 'Text shadow' },
+  { name: 'links', label: 'Links' },
+  { name: 'removed', label: 'Removed by a moderator' },
+];
+
+function ChatFields({ chat, onChange }: { chat: ChatOptions; onChange: (chat: ChatOptions) => void }) {
+  return (
+    <section>
+      <h2>Chat</h2>
+      <div className="fields">
+        {CHAT_CHOICES.map(({ name, label }) => (
+          <label key={name}>
+            {label}
+            <select value={chat[name]} onChange={(event) => onChange({ ...chat, [name]: event.currentTarget.value })}>
+              {Object.entries(CHAT_LABELS[name]).map(([value, text]) => (
+                <option key={value} value={value}>
+                  {text}
+                </option>
+              ))}
+            </select>
+          </label>
+        ))}
+        <label title="Text and emotes together.">
+          Size %
+          <input
+            type="number"
+            min={CHAT_SIZE_RANGE.min}
+            max={CHAT_SIZE_RANGE.max}
+            value={chat.size}
+            onChange={(event) => onChange({ ...chat, size: event.currentTarget.valueAsNumber || 0 })}
+          />
+        </label>
+        <label title="How many messages the page keeps on screen.">
+          Messages kept
+          <input
+            type="number"
+            min={CHAT_LINES_RANGE.min}
+            max={CHAT_LINES_RANGE.max}
+            value={chat.lines}
+            onChange={(event) => onChange({ ...chat, lines: event.currentTarget.valueAsNumber || 0 })}
+          />
+        </label>
+      </div>
+      <div className="checks">
+        <label className="check">
+          <input type="checkbox" checked={chat.kick} onChange={(event) => onChange({ ...chat, kick: event.currentTarget.checked })} />
+          Show the Kick chats
+        </label>
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={chat.youtube}
+            onChange={(event) => onChange({ ...chat, youtube: event.currentTarget.checked })}
+          />
+          Show the YouTube chats
+        </label>
+      </div>
+      <label className="highlights">
+        Highlighted phrases, one per line
+        <textarea
+          value={chat.highlights.join('\n')}
+          rows={Math.min(8, Math.max(2, chat.highlights.length + 1))}
+          spellCheck={false}
+          onChange={(event) => onChange({ ...chat, highlights: event.currentTarget.value.split('\n') })}
+        />
+      </label>
+      <p className="hint">A message mentioning one of these, in its text or its sender's name, stands out.</p>
+    </section>
+  );
+}
+
 function SetupPage() {
   const { settings, snapshot, reachable } = useAppEvents();
   const update = useUpdateState();
   const [lists, setLists] = useState<Lists>({ embeds: '', kickChats: '', youtubeChats: '' });
   const [overlay, setOverlay] = useState<OverlayOptions | null>(null);
+  const [chat, setChat] = useState<ChatOptions | null>(null);
   const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
-  const [copied, setCopied] = useState(false);
 
   // Fill the form once, from what is saved. Later pushes are this page's own saves.
   useEffect(() => {
     if (settings && overlay === null) {
       setLists(listsText(settings));
       setOverlay(settings.overlay);
+      setChat(settings.chat);
     }
   }, [settings, overlay]);
 
-  const sourceUrl = `${window.location.origin}/watchers`;
-
   async function save(event: FormEvent) {
     event.preventDefault();
-    if (!overlay) return;
+    if (!overlay || !chat) return;
     const checks = [
       { entries: lines(lists.embeds), parse: parseChannel, what: 'an embed', how: 'platform/name, such as kick/destiny' },
       { entries: lines(lists.kickChats), parse: parseKickChat, what: 'a Kick channel', how: 'a channel name, such as destiny' },
@@ -225,6 +335,7 @@ function SetupPage() {
       kickChats: lines(lists.kickChats).map((entry) => parseKickChat(entry)!),
       youtubeChats: lines(lists.youtubeChats).map((entry) => parseYouTubeChat(entry)!),
       overlay,
+      chat: { ...chat, highlights: lines(chat.highlights.join('\n')) },
     };
     const response = await fetch('/api/settings', {
       method: 'PUT',
@@ -235,8 +346,10 @@ function SetupPage() {
       setMessage({ text: response ? await response.text() : 'The app is not answering.', error: true });
       return;
     }
-    setLists(listsText((await response.json()) as Settings));
-    setMessage({ text: 'Saved. Open overlays update straight away.', error: false });
+    const saved = (await response.json()) as Settings;
+    setLists(listsText(saved));
+    setChat(saved.chat);
+    setMessage({ text: 'Saved. Open overlays and chats update straight away.', error: false });
   }
 
   async function quit() {
@@ -245,13 +358,7 @@ function SetupPage() {
     );
   }
 
-  async function copy() {
-    await navigator.clipboard.writeText(sourceUrl);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1_500);
-  }
-
-  if (!overlay) {
+  if (!overlay || !chat) {
     return (
       <main className="setup">
         <p className="status">{chatStatus(snapshot, reachable)}</p>
@@ -268,15 +375,18 @@ function SetupPage() {
       <UpdateNotice update={update} />
 
       <section>
-        <h2>OBS browser source</h2>
-        <div className="row">
-          <input className="url" readOnly value={sourceUrl} onFocus={(event) => event.currentTarget.select()} />
-          <button type="button" onClick={copy}>{copied ? 'Copied' : 'Copy'}</button>
-        </div>
-        <p className="hint">
-          In OBS, add a Browser source with this URL, sized 1920 × 1080. It draws on a transparent
-          background over whatever is below it. Keep this app running while you stream.
-        </p>
+        <h2>OBS browser sources</h2>
+        <SourceUrl
+          title="Watchers overlay"
+          path="/watchers"
+          hint="Add a Browser source in OBS with this URL, sized 1920 × 1080. It draws on a transparent background over whatever is below it."
+        />
+        <SourceUrl
+          title="Chat"
+          path="/chat"
+          open
+          hint="Everything said in the followed chats, in one list. In OBS it draws on a transparent background; size the source to the column you want. Open it in a browser to read it yourself. Keep this app running while you use either."
+        />
       </section>
 
       <form onSubmit={save}>
@@ -301,12 +411,12 @@ function SetupPage() {
           label="Everyone talking in these YouTube chats, one per line"
           value={lists.youtubeChats}
           placeholder="@destiny"
-          hint="A channel handle such as @destiny, which follows whatever that channel has live, or a video id or link. Everything above is drawn together in one overlay."
+          hint="A channel handle such as @destiny, which follows whatever that channel has live, or a video id or link. Everything above feeds both the overlay and the chat."
           onChange={(youtubeChats) => setLists({ ...lists, youtubeChats })}
         />
 
         <section>
-          <h2>Overlay</h2>
+          <h2>Watchers overlay</h2>
           <div className="fields">
             {CHOICES.map(({ name, label }) => (
               <label key={name}>
@@ -340,6 +450,8 @@ function SetupPage() {
           </div>
         </section>
 
+        <ChatFields chat={chat} onChange={setChat} />
+
         <div className="row">
           <button type="submit" className="primary">
             Save
@@ -349,7 +461,7 @@ function SetupPage() {
       </form>
 
       <section className="preview-section">
-        <h2>Preview</h2>
+        <h2>Overlay preview</h2>
         <Preview />
       </section>
 
@@ -360,7 +472,7 @@ function SetupPage() {
             Quit
           </button>
           <p className="hint inline">
-            The app sits in the system tray (the menu bar on a Mac). Quitting stops the overlays in OBS.
+            The app sits in the system tray (the menu bar on a Mac). Quitting stops the overlay and the chat.
           </p>
         </div>
       </section>

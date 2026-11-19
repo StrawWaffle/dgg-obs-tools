@@ -27,6 +27,11 @@ var (
 	motions   = []string{"drift", "bob", "orbit", "sway"}
 	colors    = []string{"flair", "white"}
 	switches  = []string{"on", "off"}
+
+	dggChat   = []string{"all", "watching", "off"}
+	shadows   = []string{"none", "soft", "strong"}
+	linkStyle = []string{"full", "short"}
+	removed   = []string{"hide", "blur", "keep"}
 )
 
 // Overlay is how the watchers overlay draws. The web side has the same shape
@@ -48,6 +53,31 @@ type Overlay struct {
 	Marks string `json:"marks"`
 }
 
+// Chat is how the combined chat page draws.
+type Chat struct {
+	// Which destiny.gg messages it shows: everything, only from people
+	// watching one of the followed embeds, or none.
+	DGG string `json:"dgg"`
+	// Whether the followed Kick and YouTube chats show.
+	Kick    bool `json:"kick"`
+	YouTube bool `json:"youtube"`
+	// Percent of the standard size, text and emotes together.
+	Size   int    `json:"size"`
+	Shadow string `json:"shadow"`
+	// The small platform icon before each name.
+	Icons string `json:"icons"`
+	// Phrases that highlight a message, one per entry, matched without case.
+	Highlights []string `json:"highlights"`
+	// Whether destiny.gg messages from people watching a followed embed stand out.
+	HighlightWatching string `json:"highlightWatching"`
+	// Links in full, or shortened to their site.
+	Links string `json:"links"`
+	// What happens to a message a moderator removes.
+	Removed string `json:"removed"`
+	// How many messages the page keeps.
+	Lines int `json:"lines"`
+}
+
 // Settings is everything the setup page saves. The three sources are
 // independent: an embed can be followed without its stream's chat, and a
 // Kick or YouTube chat without any embed.
@@ -60,6 +90,7 @@ type Settings struct {
 	// from stream to stream, or one video id.
 	YouTubeChats []string `json:"youtubeChats"`
 	Overlay      Overlay  `json:"overlay"`
+	Chat         Chat     `json:"chat"`
 }
 
 // Default is a fresh install.
@@ -67,6 +98,9 @@ func Default() Settings {
 	return Settings{Embeds: []dgg.Channel{}, KickChats: []string{}, YouTubeChats: []string{}, Overlay: Overlay{
 		Show: "speakers", Window: 10, Max: 12, Layout: "float", Names: "under",
 		Enter: "fade", Motion: "drift", Color: "flair", Speed: 100, Size: 100, Roam: 100, Inset: 4, Marks: "on",
+	}, Chat: Chat{
+		DGG: "all", Kick: true, YouTube: true, Size: 100, Shadow: "soft", Icons: "on",
+		Highlights: []string{}, HighlightWatching: "on", Links: "short", Removed: "hide", Lines: 150,
 	}}
 }
 
@@ -174,8 +208,33 @@ func (s *Settings) Validate() error {
 	}
 	s.YouTubeChats = unique(videos)
 
+	c := &s.Chat
+	if len(c.Highlights) > 50 {
+		return errors.New("at most 50 highlighted phrases")
+	}
+	highlights := make([]string, 0, len(c.Highlights))
+	for _, phrase := range c.Highlights {
+		phrase = strings.TrimSpace(phrase)
+		if phrase == "" {
+			continue
+		}
+		if len(phrase) > 60 {
+			return errors.New("a highlighted phrase can be at most 60 characters")
+		}
+		highlights = append(highlights, phrase)
+	}
+	c.Highlights = unique(highlights)
+
 	o := s.Overlay
 	return errors.Join(
+		oneOf("chat dgg", c.DGG, dggChat),
+		within("chat size", c.Size, 50, 300),
+		oneOf("chat shadow", c.Shadow, shadows),
+		oneOf("chat icons", c.Icons, switches),
+		oneOf("chat highlightWatching", c.HighlightWatching, switches),
+		oneOf("chat links", c.Links, linkStyle),
+		oneOf("chat removed", c.Removed, removed),
+		within("chat lines", c.Lines, 20, 300),
 		oneOf("show", o.Show, shows),
 		within("window", o.Window, 1, 1440),
 		within("max", o.Max, 1, 100),

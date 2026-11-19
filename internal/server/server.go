@@ -79,34 +79,16 @@ func New(tracker *watchers.Tracker, updater *update.Updater, restart, quit func(
 	// Server-sent events rather than a WebSocket: one direction is all an
 	// overlay needs, and the browser reconnects an EventSource by itself.
 	mux.HandleFunc("GET /api/events", func(w http.ResponseWriter, r *http.Request) {
-		flusher, ok := w.(http.Flusher)
-		if !ok {
-			http.Error(w, "streaming unsupported", http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-store")
-
-		events, unsubscribe := tracker.Subscribe()
-		defer unsubscribe()
-		for {
-			select {
-			case <-r.Context().Done():
-				return
-			case event := <-events:
-				data, err := json.Marshal(event.Data)
-				if err != nil {
-					continue
-				}
-				if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, data); err != nil {
-					return
-				}
-				flusher.Flush()
-			}
-		}
+		stream(w, r, tracker.Subscribe)
+	})
+	mux.HandleFunc("GET /api/chat/events", func(w http.ResponseWriter, r *http.Request) {
+		stream(w, r, tracker.SubscribeChat)
 	})
 
 	static := http.FileServerFS(pages)
+	mux.HandleFunc("GET /chat", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFileFS(w, r, pages, "chat.html")
+	})
 	mux.HandleFunc("GET /watchers", func(w http.ResponseWriter, r *http.Request) {
 		// Every option lives in the saved settings, so the overlay page never
 		// changes and an OBS cache can keep it.
@@ -115,6 +97,35 @@ func New(tracker *watchers.Tracker, updater *update.Updater, restart, quit func(
 	mux.Handle("GET /", static)
 
 	return localOnly(mux)
+}
+
+// stream sends a page its events until it goes away.
+func stream(w http.ResponseWriter, r *http.Request, subscribe func() (<-chan watchers.Event, func())) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-store")
+
+	events, unsubscribe := subscribe()
+	defer unsubscribe()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case event := <-events:
+			data, err := json.Marshal(event.Data)
+			if err != nil {
+				continue
+			}
+			if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, data); err != nil {
+				return
+			}
+			flusher.Flush()
+		}
+	}
 }
 
 // localOnly refuses requests whose Host is not this machine. The server only

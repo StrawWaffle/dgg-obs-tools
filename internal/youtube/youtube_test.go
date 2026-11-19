@@ -21,6 +21,9 @@ func TestToMessage(t *testing.T) {
 	if !ok {
 		t.Fatal("message dropped")
 	}
+	if len(message.Parts) != 2 || message.Parts[0].Text != "lol " || message.Parts[1].URL == "" {
+		t.Fatalf("parts %+v", message.Parts)
+	}
 	if message.Nick != "FyterianTV" || message.Emote != "grinning_squinting_face" ||
 		message.EmoteURL != "https://fonts.gstatic.com/s/e/notoemoji/15.1/1f606/72.png" ||
 		message.At.UnixMicro() != 1763542554000000 {
@@ -33,5 +36,17 @@ func TestIsVideoID(t *testing.T) {
 		if IsVideoID(entry) != want {
 			t.Errorf("IsVideoID(%q)", entry)
 		}
+	}
+}
+
+func TestToRemoval(t *testing.T) {
+	var one, everything action
+	_ = json.Unmarshal([]byte(`{"removeChatItemAction":{"targetItemId":"abc"}}`), &one)
+	_ = json.Unmarshal([]byte(`{"markChatItemsByAuthorAsDeletedAction":{"externalChannelId":"UC123"}}`), &everything)
+	if removal, ok := toRemoval(one); !ok || removal.IDs[0] != "yt-abc" {
+		t.Fatalf("one %+v", removal)
+	}
+	if removal, ok := toRemoval(everything); !ok || removal.AuthorID != "UC123" {
+		t.Fatalf("everything %+v", removal)
 	}
 }

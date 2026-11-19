@@ -176,3 +176,42 @@ form > .row {
 .hint.inline {
   margin: 0;
 }
+
+h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.source + .source {
+  margin-top: 20px;
+}
+
+a.button {
+  padding: 6px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  text-decoration: none;
+}
+
+a.button:hover {
+  border-color: var(--muted);
+}
+
+.checks {
+  display: flex;
+  gap: 20px;
+  margin-top: 12px;
+}
+
+label.check {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+}
+
+label.highlights {
+  margin-top: 16px;
+}

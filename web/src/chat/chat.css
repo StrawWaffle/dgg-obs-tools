@@ -1,0 +1,170 @@
+/*
+ * The combined chat, for OBS and for reading in a browser. In OBS it draws on
+ * nothing, over the stream; in a browser it has a page of its own.
+ */
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  overflow: hidden;
+}
+
+.chat-waiting {
+  margin: 16px;
+  color: #8a8a8a;
+  font: 15px/1.5 Roboto, sans-serif;
+}
+
+.chat {
+  --chat-size: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  color: #e8e8e8;
+  font-family: Roboto, sans-serif;
+  font-size: 16px;
+}
+
+.chat-browser {
+  background: #111;
+}
+
+.chat-obs,
+html:has(.chat-obs),
+html:has(.chat-obs) body {
+  background: transparent;
+}
+
+.chat-lines {
+  flex: 1;
+  overflow-y: auto;
+  /* `zoom`, as on the watchers overlay, so emotes grow with the text and their
+     sprite strips stay in step. */
+  zoom: var(--chat-size);
+  padding: 4px 0;
+}
+
+.chat-obs .chat-lines {
+  overflow: hidden;
+  /* New lines arrive at the bottom and old ones leave over the top. */
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.chat-line {
+  padding: 3px 8px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.chat-line .platform-icon {
+  width: 14px;
+  height: 14px;
+  margin-right: 6px;
+  vertical-align: -2px;
+}
+
+.chat-name {
+  font-weight: 700;
+}
+
+.chat-highlight {
+  background: rgb(63 154 110 / 0.22);
+  box-shadow: inset 3px 0 0 #3f9a6e;
+}
+
+/* A /me message, the way chat-gui draws it. */
+.chat-action .text {
+  font-style: italic;
+}
+
+.chat-action .chat-name {
+  margin-right: 0.4em;
+}
+
+/* Greentext, in chat-gui's green. */
+.chat-green .text {
+  color: #6ca528;
+}
+
+/* A message a moderator took down, unreadable until somebody chooses to look. */
+.chat-removed .text {
+  filter: blur(5px);
+  transition: filter 150ms ease;
+}
+
+.chat-browser .chat-removed:hover .text {
+  filter: none;
+}
+
+.chat-line a {
+  color: #6fb3f2;
+  text-decoration: none;
+}
+
+.chat-browser .chat-line a:hover {
+  text-decoration: underline;
+}
+
+/*
+ * destiny.gg's own emotes are drawn by its stylesheet; this is the base rule
+ * chat-gui supplies, at no weight so every `.emote.<prefix>` rule beats it.
+ * The name inside is for copying and screen readers, and is pushed out of view.
+ */
+:where(.chat-line) .emote {
+  display: inline-block;
+  position: relative;
+  overflow: hidden;
+  text-indent: -999em;
+  vertical-align: middle;
+  background-repeat: no-repeat;
+  background-position: 0 0;
+}
+
+/* Kick and YouTube emotes are pictures, sized like destiny.gg's. */
+.chat-line .emote-picture {
+  height: 28px;
+  vertical-align: middle;
+}
+
+.chat-shadow-soft .chat-line {
+  text-shadow: 0 1px 2px rgb(0 0 0 / 0.9);
+}
+
+.chat-shadow-strong .chat-line {
+  text-shadow:
+    -1px -1px 0 #000,
+    1px -1px 0 #000,
+    -1px 1px 0 #000,
+    1px 1px 0 #000,
+    0 0 4px #000;
+}
+
+/* Rainbow flair names are clipped gradients, which a text shadow would paint over. */
+.chat-name:is(.flair-flair42, .flair-flair33) {
+  text-shadow: none;
+}
+
+.chat-more {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  translate: -50% 0;
+  padding: 6px 12px;
+  border: 1px solid #474747;
+  border-radius: 6px;
+  background: #1c1c1c;
+  color: #e8e8e8;
+  font: inherit;
+  cursor: pointer;
+}
+
+.chat-more:hover {
+  border-color: #8a8a8a;
+}

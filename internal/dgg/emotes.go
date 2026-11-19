@@ -77,6 +77,16 @@ func FetchCatalogue(ctx context.Context, client *http.Client) (*Catalogue, error
 	return ParseCatalogue(body)
 }
 
+// usable says whether word is an emote somebody of this tier can use, which
+// is when chat draws it rather than leaving it as text.
+func (c *Catalogue) usable(word string, subTier int) bool {
+	if c == nil {
+		return false
+	}
+	tier, ok := c.tiers[word]
+	return ok && tier <= subTier
+}
+
 // LastEmote is the last emote in a message that its author could use.
 //
 // Chat draws an emote only when it is a whole word, case sensitive, with
