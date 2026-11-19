@@ -46,6 +46,52 @@ function chatStatus(snapshot: WatchersSnapshot | null, reachable: boolean): stri
   return `Connected. ${people} in chat on ${where}.`;
 }
 
+interface UpdateState {
+  current: string;
+  /** A newer version already on disk, waiting for a restart. */
+  installed: string;
+  error: string;
+}
+
+/** The app's version and whether an update is waiting. Updates arrive rarely, so once a minute is plenty. */
+function useUpdateState(): UpdateState | null {
+  const [state, setState] = useState<UpdateState | null>(null);
+  useEffect(() => {
+    const load = () =>
+      fetch('/api/status')
+        .then((response) => (response.ok ? response.json() : null))
+        .then((status: { update: UpdateState } | null) => status && setState(status.update))
+        .catch(() => undefined);
+    void load();
+    const timer = window.setInterval(load, 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  return state;
+}
+
+function UpdateNotice({ update }: { update: UpdateState | null }) {
+  const [restarting, setRestarting] = useState(false);
+  if (!update?.installed) return null;
+
+  async function restart() {
+    setRestarting(true);
+    await fetch('/api/restart', { method: 'POST', headers: { 'Content-Type': 'application/json' } }).catch(
+      () => undefined,
+    );
+    // The new copy takes a moment to start listening, then this page reloads into it.
+    window.setTimeout(() => window.location.reload(), 2_000);
+  }
+
+  return (
+    <p className="notice">
+      Version {update.installed} is installed. Restart to switch to it; OBS reconnects by itself.{' '}
+      <button type="button" onClick={restart} disabled={restarting}>
+        {restarting ? 'Restarting…' : 'Restart'}
+      </button>
+    </p>
+  );
+}
+
 /** The overlay is laid out for 1920 × 1080; the preview draws it at that size and scales it to fit. */
 function Preview() {
   const box = useRef<HTMLDivElement>(null);
@@ -68,6 +114,7 @@ function Preview() {
 
 function SetupPage() {
   const { settings, snapshot, reachable } = useAppEvents();
+  const update = useUpdateState();
   const [channel, setChannel] = useState('');
   const [overlay, setOverlay] = useState<OverlayOptions | null>(null);
   const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
@@ -125,8 +172,11 @@ function SetupPage() {
 
   return (
     <main className="setup">
-      <h1>dgg-obs-tools</h1>
+      <h1>
+        dgg-obs-tools <span className="version">{update?.current}</span>
+      </h1>
       <p className="status">{chatStatus(snapshot, reachable)}</p>
+      <UpdateNotice update={update} />
 
       <section>
         <h2>OBS browser source</h2>

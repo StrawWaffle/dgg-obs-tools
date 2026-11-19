@@ -15,11 +15,15 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"runtime"
+	"slices"
+	"sync"
 	"time"
 
 	"github.com/StrawWaffle/dgg-obs-tools/internal/server"
 	"github.com/StrawWaffle/dgg-obs-tools/internal/settings"
+	"github.com/StrawWaffle/dgg-obs-tools/internal/update"
 	"github.com/StrawWaffle/dgg-obs-tools/internal/watchers"
 	"github.com/StrawWaffle/dgg-obs-tools/web"
 )
@@ -60,12 +64,32 @@ func main() {
 	tracker := watchers.New(settingsPath)
 	go tracker.Run(ctx)
 
+	// Taken now, because an update renames (Windows) or replaces (elsewhere)
+	// the running file, after which the system may report the old one.
+	executable, err := os.Executable()
+	if err == nil {
+		executable, err = filepath.EvalSymlinks(executable)
+	}
+	if err != nil {
+		log.Fatalf("could not find this program's own file: %v", err)
+	}
+
+	updater := update.New(version)
+	go updater.Run(ctx, executable)
+
+	restarting := make(chan struct{})
+	var restartOnce sync.Once
+	restart := func() { restartOnce.Do(func() { close(restarting) }) }
+
 	httpServer := &http.Server{
-		Handler:           server.New(tracker, web.Pages(), version),
+		Handler:           server.New(tracker, updater, restart, web.Pages()),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {
-		<-ctx.Done()
+		select {
+		case <-ctx.Done():
+		case <-restarting:
+		}
 		shutdown, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		_ = httpServer.Shutdown(shutdown)
@@ -83,6 +107,27 @@ func main() {
 	if err := httpServer.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
 	}
+	select {
+	case <-restarting:
+		relaunch(executable)
+	default:
+	}
+}
+
+// relaunch starts the file on disk again, which after an update is the new
+// version, once this copy has let go of the port. The pages that were open
+// reconnect to it by themselves, so it does not open another one.
+func relaunch(executable string) {
+	args := os.Args[1:]
+	if !slices.Contains(args, "-no-browser") {
+		args = append(args, "-no-browser")
+	}
+	command := exec.Command(executable, args...)
+	command.Stdin, command.Stdout, command.Stderr = os.Stdin, os.Stdout, os.Stderr
+	if err := command.Start(); err != nil {
+		log.Fatalf("could not restart: %v", err)
+	}
+	fmt.Println("Restarted as the updated version.")
 }
 
 func alreadyRunning(address string) bool {

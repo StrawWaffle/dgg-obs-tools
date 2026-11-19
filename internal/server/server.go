@@ -11,25 +11,38 @@ import (
 	"strings"
 
 	"github.com/StrawWaffle/dgg-obs-tools/internal/settings"
+	"github.com/StrawWaffle/dgg-obs-tools/internal/update"
 	"github.com/StrawWaffle/dgg-obs-tools/internal/watchers"
 )
 
 // Status identifies a running copy, so a second launch can find the first.
 type Status struct {
-	App     string `json:"app"`
-	Version string `json:"version"`
+	App    string       `json:"app"`
+	Update update.State `json:"update"`
 }
 
 // AppName is what Status reports in App.
 const AppName = "dgg-obs-tools"
 
 // New builds the handler. pages is the built web app: index.html (setup),
-// watchers.html (the overlay) and their assets.
-func New(tracker *watchers.Tracker, pages fs.FS, version string) http.Handler {
+// watchers.html (the overlay) and their assets. restart is called once the
+// response to a restart request has gone out.
+func New(tracker *watchers.Tracker, updater *update.Updater, restart func(), pages fs.FS) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /api/status", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, Status{App: AppName, Version: version})
+		writeJSON(w, http.StatusOK, Status{App: AppName, Update: updater.State()})
+	})
+
+	// Switches to an update that is already on disk. Open pages reconnect by
+	// themselves once the new copy is listening.
+	mux.HandleFunc("POST /api/restart", func(w http.ResponseWriter, r *http.Request) {
+		if !isJSON(r) {
+			http.Error(w, "expected application/json", http.StatusUnsupportedMediaType)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+		go restart()
 	})
 
 	mux.HandleFunc("GET /api/settings", func(w http.ResponseWriter, r *http.Request) {
@@ -37,10 +50,7 @@ func New(tracker *watchers.Tracker, pages fs.FS, version string) http.Handler {
 	})
 
 	mux.HandleFunc("PUT /api/settings", func(w http.ResponseWriter, r *http.Request) {
-		// Only the setup page's own fetch sends JSON. A page on another site
-		// can post a form to localhost but cannot send this content type
-		// without a preflight, which nothing here answers.
-		if mediaType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); mediaType != "application/json" {
+		if !isJSON(r) {
 			http.Error(w, "expected application/json", http.StatusUnsupportedMediaType)
 			return
 		}
@@ -117,6 +127,14 @@ func localOnly(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// isJSON guards the routes that change something. A page on another site can
+// send a form to localhost, but not this content type without a preflight,
+// which nothing here answers.
+func isJSON(r *http.Request) bool {
+	mediaType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	return mediaType == "application/json"
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
