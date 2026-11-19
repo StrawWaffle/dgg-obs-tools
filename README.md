@@ -144,6 +144,7 @@ to a copy of the program running on the default port.
 Tests: `go test ./...` and `npm test` in `web/`.
 
 To publish a release, push a tag such as `v0.2.0`. The release workflow builds
-every platform with `scripts/build-release.sh` and attaches the files and
-`checksums.txt`. Copies built from source report version `dev` and never
+Windows and Linux with `scripts/build-release.sh` and publishes them with
+`checksums.txt`; the Mac files follow from `macos.yml` once a Mac is free. If
+they never arrive, start the **Mac files** workflow by hand with the tag. Copies built from source report version `dev` and never
 update themselves.

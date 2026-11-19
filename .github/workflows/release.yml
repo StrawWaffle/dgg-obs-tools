@@ -4,9 +4,9 @@ name: Release
 # a few hours and install it.
 #
 # The release is published as soon as the Windows and Linux files are built.
-# The Mac files are added to it afterwards, because GitHub's Mac machines can
-# keep a build queued for a long time and nobody else should wait for them.
-# Until they arrive, Mac copies simply see no newer release for their system.
+# The Mac files are added to it afterwards (macos.yml), because GitHub's Mac
+# machines can keep a build queued and nobody else should wait for them. Until
+# they arrive, Mac copies simply see no newer release for their system.
 on:
   push:
     tags: ['v*']
@@ -22,19 +22,6 @@ jobs:
       - uses: actions/upload-artifact@v5
         with:
           name: release
-          path: dist/*
-
-  # The menu bar icon needs cgo and Cocoa, so Mac builds are made on a Mac.
-  build-macos:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: ./.github/actions/build
-        with:
-          targets: darwin/amd64 darwin/arm64
-      - uses: actions/upload-artifact@v5
-        with:
-          name: release-macos
           path: dist/*
 
   publish:
@@ -53,20 +40,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
-  # Adds the Mac files to the published release, and their lines to its
-  # checksums list, which the updater checks every download against.
-  add-macos:
-    needs: [build-macos, publish]
-    runs-on: ubuntu-latest
+  macos:
+    needs: publish
     permissions:
       contents: write
-    env:
-      GH_TOKEN: ${{ github.token }}
-    steps:
-      - uses: actions/download-artifact@v5
-        with:
-          name: release-macos
-          path: macos
-      - run: gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --pattern checksums.txt
-      - run: (cd macos && sha256sum -- *) >> checksums.txt
-      - run: gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" macos/* checksums.txt --clobber
+    uses: ./.github/workflows/macos.yml
+    with:
+      tag: ${{ github.ref_name }}

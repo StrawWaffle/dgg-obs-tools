@@ -1,0 +1,70 @@
+name: Mac files
+
+# Builds the Mac files for a published release and adds them to it, with their
+# lines in its checksums list. The release workflow runs this once the release
+# is out; it can also be started by hand for a tag whose Mac files are missing.
+#
+# The menu bar icon needs cgo and Cocoa, so Mac files are built on a Mac. An
+# Intel one: GitHub's Apple-silicon Macs are often short of capacity, and a job
+# that waits on them is cancelled after a quarter of an hour. Apple's compiler
+# builds for Apple silicon from an Intel Mac just as well.
+on:
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The release tag to add Mac files to, such as v0.6.0.
+        type: string
+        required: true
+
+jobs:
+  build:
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      # The same commit was already tested on Linux before the release went out.
+      - run: npm ci && npm run build
+        working-directory: web
+      - run: scripts/build-release.sh "$TAG" darwin/amd64 darwin/arm64
+        env:
+          TAG: ${{ inputs.tag }}
+      - uses: actions/upload-artifact@v5
+        with:
+          name: release-macos
+          path: dist/*
+
+  add:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: release-macos
+          path: macos
+      - run: gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern checksums.txt
+      # Drop any earlier Mac lines first, so adding the files again does not
+      # leave two checksums for one name.
+      - run: |
+          grep -v '_macos_' checksums.txt > checksums.new || true
+          (cd macos && sha256sum -- *) >> checksums.new
+          mv checksums.new checksums.txt
+      - run: gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" macos/* checksums.txt --clobber
