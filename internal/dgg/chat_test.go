@@ -2,6 +2,8 @@ package dgg
 
 import (
 	"strings"
+
+	"github.com/StrawWaffle/dgg-obs-tools/internal/chat"
 	"testing"
 	"time"
 )
@@ -17,7 +19,7 @@ func frame(t *testing.T, raw string) Frame {
 	return parsed
 }
 
-func nicks(watchers []Watcher) string {
+func nicks(watchers []chat.Watcher) string {
 	names := make([]string, len(watchers))
 	for i, watcher := range watchers {
 		names[i] = watcher.Nick
@@ -170,10 +172,10 @@ func TestCatalogueVersionFollowsTheManifest(t *testing.T) {
 }
 
 func TestRetryDelayStaysInItsWindow(t *testing.T) {
-	if got := retryDelay(0, func() float64 { return 0 }); got != retryMin {
+	if got := chat.RetryDelay(0, func() float64 { return 0 }); got != 500*time.Millisecond {
 		t.Fatalf("floor %v", got)
 	}
-	if got := retryDelay(40, func() float64 { return 0.999999 }); got > retryWindowCap {
+	if got := chat.RetryDelay(40, func() float64 { return 0.999999 }); got > 60*time.Second {
 		t.Fatalf("cap %v", got)
 	}
 }

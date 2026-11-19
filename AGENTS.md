@@ -22,7 +22,10 @@
 ## Layout
 
 - `main.go`: flags, single-instance check, HTTP server on loopback.
-- `internal/dgg`: chat socket, roster, emote list, flair colours.
+- `internal/dgg`: destiny.gg chat socket, roster, emote list, flair colours.
+- `internal/kick`, `internal/youtube`: anonymous Kick (Centrifugo) and YouTube
+  (live chat polling) readers.
+- `internal/chat`: the watcher type and backoff they share.
 - `internal/watchers`: the tracker that feeds open pages.
 - `internal/settings`: saved settings and their limits (mirrored in
   `web/src/watchers/options.ts`).

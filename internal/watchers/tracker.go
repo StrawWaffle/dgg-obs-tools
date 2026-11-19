@@ -1,5 +1,10 @@
-// Package watchers keeps the roster for the chosen channel and hands it to
-// every open overlay.
+// Package watchers keeps track of who is watching the followed embeds and
+// hands that to every open overlay.
+//
+// Three sources feed it. destiny.gg chat names everyone with a followed embed
+// open, talking or not. Kick and YouTube chat name the people talking in a
+// followed stream's own chat, who are watching it too; they are kept from
+// their messages, since neither platform lists who is in a chat.
 package watchers
 
 import (
@@ -7,22 +12,26 @@ import (
 	"log"
 	"net/http"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/StrawWaffle/dgg-obs-tools/internal/chat"
 	"github.com/StrawWaffle/dgg-obs-tools/internal/dgg"
+	"github.com/StrawWaffle/dgg-obs-tools/internal/kick"
 	"github.com/StrawWaffle/dgg-obs-tools/internal/settings"
+	"github.com/StrawWaffle/dgg-obs-tools/internal/youtube"
 )
 
 const (
-	// The chat connection is held while an overlay or the setup page is open,
+	// The connections are held while an overlay or the setup page is open,
 	// and for this long after the last one closes, so a scene switch or an OBS
 	// reload does not cost a reconnect. Nobody looking means nothing to draw,
-	// and no reason to sit on destiny.gg's chat.
+	// and no reason to sit on anybody's chat.
 	idleGrace = 2 * time.Minute
 
-	// Chat runs at a couple of events a second. Overlays are sent at most one
+	// Chat runs at a few events a second. Overlays are sent at most one
 	// snapshot a second, which is as often as their own clock ticks anyway.
 	pushEvery = time.Second
 
@@ -30,16 +39,23 @@ const (
 
 	// Enough for any overlay, and it keeps each push small on a busy channel.
 	watcherLimit = 100
+
+	// Kick and YouTube never say when somebody leaves, so somebody who has
+	// not talked for this long is taken to have gone. The speaking window, if
+	// longer, keeps them for as long as it asks.
+	speakerRetention = 30 * time.Minute
 )
 
 // Snapshot is what an overlay draws from. Every field of it is already public
-// in destiny.gg chat.
+// in the chats it comes from.
 type Snapshot struct {
-	Channels     []dgg.Channel `json:"channels"`
-	ChatCount    int           `json:"chatCount"`
-	Watchers     []dgg.Watcher `json:"watchers"`
-	EmoteVersion *string       `json:"emoteVersion"`
-	Connected    bool          `json:"connected"`
+	Channels []dgg.Channel `json:"channels"`
+	// For each followed YouTube channel, the live stream found on it, or "".
+	LiveVideos   map[string]string `json:"liveVideos"`
+	ChatCount    int               `json:"chatCount"`
+	Watchers     []chat.Watcher    `json:"watchers"`
+	EmoteVersion *string           `json:"emoteVersion"`
+	Connected    bool              `json:"connected"`
 }
 
 // Event is one message to an open page.
@@ -48,18 +64,28 @@ type Event struct {
 	Data any
 }
 
-// Tracker is the one chat connection and roster for the app. New embeds need
-// a new connection, because chat only sends its roster on connect.
+// Tracker holds the connections and the people they report.
 type Tracker struct {
 	settingsPath string
 	client       *http.Client
 
-	mu          sync.Mutex
-	settings    settings.Settings
-	roster      *dgg.Roster
-	catalogue   *dgg.Catalogue
-	socket      *dgg.Socket
-	stopSocket  context.CancelFunc
+	mu        sync.Mutex
+	settings  settings.Settings
+	catalogue *dgg.Catalogue
+
+	// destiny.gg chat. New embeds need a new connection, because chat only
+	// sends its roster on connect.
+	roster     *dgg.Roster
+	socket     *dgg.Socket
+	stopSocket context.CancelFunc
+
+	// Kick and YouTube. YouTube channels are followed from stream to stream,
+	// and live maps each followed channel to the stream it is on now.
+	stopOthers context.CancelFunc
+	live       map[string]string
+	// Who has talked on Kick or YouTube, by chat.Watcher.Key.
+	speakers map[string]chat.Watcher
+
 	subscribers map[chan Event]struct{}
 	lastSeen    time.Time
 	dirty       bool
@@ -71,24 +97,45 @@ func New(settingsPath string) *Tracker {
 		settingsPath: settingsPath,
 		client:       &http.Client{},
 		settings:     settings.Load(settingsPath),
+		live:         map[string]string{},
+		speakers:     map[string]chat.Watcher{},
 		subscribers:  map[chan Event]struct{}{},
 	}
 	t.roster = t.newRoster()
 	return t
 }
 
+// dggChannels are the embeds destiny.gg chat is asked about. A YouTube
+// channel counts once a live stream has been found on it, because destiny.gg
+// names a YouTube embed by its video.
+func (t *Tracker) dggChannels() []dgg.Channel {
+	var channels []dgg.Channel
+	for _, channel := range t.settings.Channels {
+		if channel.Platform == chat.YouTube && !youtube.IsVideoID(channel.ID) {
+			video := t.live[channel.ID]
+			if video == "" {
+				continue
+			}
+			channel.ID = video
+		}
+		channels = append(channels, channel)
+	}
+	return channels
+}
+
 func (t *Tracker) newRoster() *dgg.Roster {
-	if len(t.settings.Channels) == 0 {
+	channels := t.dggChannels()
+	if len(channels) == 0 {
 		return nil
 	}
-	return dgg.NewRoster(t.settings.Channels, func(text string, tier int) string {
+	return dgg.NewRoster(channels, func(text string, tier int) string {
 		// Called with t.mu held, from onFrame.
 		return t.catalogue.LastEmote(text, tier)
 	})
 }
 
-// Run keeps the emote list fresh, opens and closes the chat connection as
-// pages come and go, and pushes snapshots until ctx ends.
+// Run keeps the emote list fresh, opens and closes the connections as pages
+// come and go, and pushes snapshots until ctx ends.
 func (t *Tracker) Run(ctx context.Context) {
 	go t.refreshCatalogue(ctx)
 
@@ -98,12 +145,13 @@ func (t *Tracker) Run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			t.mu.Lock()
-			t.closeChat()
+			t.closeAll()
 			t.mu.Unlock()
 			return
 		case <-ticker.C:
 			t.mu.Lock()
 			t.gate(ctx)
+			t.forgetQuietSpeakers()
 			if t.dirty {
 				t.dirty = false
 				t.publish(Event{Type: "snapshot", Data: t.snapshot()})
@@ -139,31 +187,78 @@ func (t *Tracker) refreshCatalogue(ctx context.Context) {
 	}
 }
 
-// gate opens the chat connection when there is a channel and somebody to
-// draw for, and closes it once there has been nobody for idleGrace.
+// gate opens the connections when there is something to follow and somebody
+// to draw for, and closes them once there has been nobody for idleGrace.
 func (t *Tracker) gate(ctx context.Context) {
 	if len(t.subscribers) > 0 {
 		t.lastSeen = time.Now()
 	}
 	wanted := len(t.settings.Channels) > 0 && time.Since(t.lastSeen) < idleGrace
-	switch {
-	case wanted && t.socket == nil:
-		socketCtx, cancel := context.WithCancel(ctx)
-		socket := &dgg.Socket{URL: dgg.ChatSocketURL}
-		socket.OnFrame = func(raw string) { t.onFrame(socketCtx, socket, raw) }
-		t.socket, t.stopSocket = socket, cancel
-		go socket.Run(socketCtx)
-	case !wanted && t.socket != nil:
-		t.closeChat()
-		t.dirty = true
+	if !wanted {
+		if t.socket != nil || t.stopOthers != nil {
+			t.closeAll()
+			t.dirty = true
+		}
+		return
+	}
+	if t.socket == nil {
+		t.openDGG(ctx)
+	}
+	if t.stopOthers == nil {
+		t.openOthers(ctx)
 	}
 }
 
-func (t *Tracker) closeChat() {
+func (t *Tracker) openDGG(ctx context.Context) {
+	socketCtx, cancel := context.WithCancel(ctx)
+	socket := &dgg.Socket{URL: dgg.ChatSocketURL}
+	socket.OnFrame = func(raw string) { t.onFrame(socketCtx, socket, raw) }
+	t.socket, t.stopSocket = socket, cancel
+	go socket.Run(socketCtx)
+}
+
+// openOthers starts Kick chat and a source for each YouTube entry. A YouTube
+// channel is looked up even when its chat is not read, because destiny.gg's
+// embed for it is named by the live video.
+func (t *Tracker) openOthers(ctx context.Context) {
+	othersCtx, cancel := context.WithCancel(ctx)
+	t.stopOthers = cancel
+	readChats := t.settings.PlatformChats
+
+	var kickChannels []string
+	for _, channel := range t.settings.Channels {
+		switch channel.Platform {
+		case chat.Kick:
+			kickChannels = append(kickChannels, channel.ID)
+		case chat.YouTube:
+			if !readChats && youtube.IsVideoID(channel.ID) {
+				continue
+			}
+			entry := channel.ID
+			source := &youtube.Source{
+				Entry:      entry,
+				LookupOnly: !readChats,
+				OnLive:     func(video string) { t.onLive(othersCtx, entry, video) },
+				OnMessage:  func(m youtube.Message) { t.onYouTube(othersCtx, m) },
+			}
+			go source.Run(othersCtx)
+		}
+	}
+	if readChats && len(kickChannels) > 0 {
+		client := &kick.Client{Channels: kickChannels, OnMessage: func(m kick.Message) { t.onKick(othersCtx, m) }}
+		go client.Run(othersCtx)
+	}
+}
+
+func (t *Tracker) closeAll() {
 	if t.stopSocket != nil {
 		t.stopSocket()
 	}
 	t.socket, t.stopSocket = nil, nil
+	if t.stopOthers != nil {
+		t.stopOthers()
+	}
+	t.stopOthers = nil
 	t.roster = t.newRoster()
 }
 
@@ -186,20 +281,119 @@ func (t *Tracker) onFrame(ctx context.Context, socket *dgg.Socket, raw string) {
 	t.dirty = true
 }
 
+// onLive records the stream found on a YouTube channel. destiny.gg names that
+// embed by its video, so a new stream means asking destiny.gg chat again.
+func (t *Tracker) onLive(ctx context.Context, entry, video string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if ctx.Err() != nil || t.live[entry] == video {
+		return
+	}
+	t.live[entry] = video
+	t.roster = t.newRoster()
+	if t.socket != nil {
+		t.socket.Reconnect()
+	}
+	t.dirty = true
+}
+
+func (t *Tracker) onKick(ctx context.Context, m kick.Message) {
+	t.speak(ctx, chat.Watcher{
+		Nick:      m.Nick,
+		Platform:  chat.Kick,
+		Color:     chat.Optional(m.Color),
+		LastEmote: chat.Optional(m.Emote),
+		EmoteURL:  chat.Optional(m.EmoteURL),
+	}, m.At)
+}
+
+func (t *Tracker) onYouTube(ctx context.Context, m youtube.Message) {
+	t.speak(ctx, chat.Watcher{
+		Nick:      m.Nick,
+		Platform:  chat.YouTube,
+		LastEmote: chat.Optional(m.Emote),
+		EmoteURL:  chat.Optional(m.EmoteURL),
+	}, m.At)
+}
+
+// speak records somebody talking on Kick or YouTube. As on destiny.gg, a
+// message without an emote leaves the last one they used.
+func (t *Tracker) speak(ctx context.Context, w chat.Watcher, at time.Time) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if ctx.Err() != nil {
+		return
+	}
+	w.LastSpokeAt = &at
+	if known, ok := t.speakers[w.Key()]; ok {
+		if known.LastSpokeAt != nil && known.LastSpokeAt.After(at) {
+			// The backlog YouTube sends first can arrive after a newer message.
+			return
+		}
+		if w.LastEmote == nil {
+			w.LastEmote, w.EmoteURL = known.LastEmote, known.EmoteURL
+		}
+	}
+	t.speakers[w.Key()] = w
+	t.dirty = true
+}
+
+func (t *Tracker) forgetQuietSpeakers() {
+	keep := max(speakerRetention, time.Duration(t.settings.Overlay.Window)*time.Minute)
+	for key, speaker := range t.speakers {
+		if time.Since(*speaker.LastSpokeAt) > keep {
+			delete(t.speakers, key)
+			t.dirty = true
+		}
+	}
+}
+
 func (t *Tracker) snapshot() Snapshot {
-	snapshot := Snapshot{Channels: t.settings.Channels, Watchers: []dgg.Watcher{}}
+	snapshot := Snapshot{
+		Channels:   t.settings.Channels,
+		LiveVideos: map[string]string{},
+		Watchers:   []chat.Watcher{},
+	}
+	for _, channel := range t.settings.Channels {
+		if channel.Platform == chat.YouTube && !youtube.IsVideoID(channel.ID) {
+			snapshot.LiveVideos[channel.ID] = t.live[channel.ID]
+		}
+	}
 	if t.catalogue != nil {
 		snapshot.EmoteVersion = &t.catalogue.Version
 	}
 	if t.socket != nil {
 		snapshot.Connected = t.socket.State().Connected
 	}
+
+	var everyone []chat.Watcher
 	if t.roster != nil {
-		snapshot.ChatCount = t.roster.Len()
-		list := t.roster.List()
-		snapshot.Watchers = list[:min(len(list), watcherLimit)]
+		everyone = t.roster.List()
 	}
+	for _, speaker := range t.speakers {
+		everyone = append(everyone, speaker)
+	}
+	snapshot.ChatCount = len(everyone)
+	sortBySpeaking(everyone)
+	snapshot.Watchers = everyone[:min(len(everyone), watcherLimit)]
 	return snapshot
+}
+
+// sortBySpeaking puts whoever spoke most recently first, then everyone else
+// by name, so a capped list keeps the people an overlay is likeliest to draw.
+func sortBySpeaking(watchers []chat.Watcher) {
+	sort.SliceStable(watchers, func(i, j int) bool {
+		left, right := watchers[i].LastSpokeAt, watchers[j].LastSpokeAt
+		switch {
+		case left != nil && right != nil && !left.Equal(*right):
+			return left.After(*right)
+		case left != nil && right == nil:
+			return true
+		case left == nil && right != nil:
+			return false
+		}
+		return watchers[i].Key() < watchers[j].Key()
+	})
 }
 
 func (t *Tracker) publish(event Event) {
@@ -250,18 +444,16 @@ func (t *Tracker) SetSettings(next settings.Settings) error {
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	previous := t.settings.Channels
+	previous := t.settings
 	t.settings = next
-	if !slices.Equal(previous, next.Channels) {
+	if !slices.Equal(previous.Channels, next.Channels) || previous.PlatformChats != next.PlatformChats {
+		// Everything follows the new list from scratch; the next tick reopens
+		// what is wanted. Kick and YouTube speakers from embeds no longer
+		// followed go with it.
+		t.closeAll()
+		t.live = map[string]string{}
+		t.speakers = map[string]chat.Watcher{}
 		t.roster = t.newRoster()
-		// The roster only arrives on connect, so new embeds need a new connection.
-		if t.socket != nil {
-			if len(next.Channels) == 0 {
-				t.closeChat()
-			} else {
-				t.socket.Reconnect()
-			}
-		}
 	}
 	t.publish(Event{Type: "settings", Data: t.settings})
 	t.publish(Event{Type: "snapshot", Data: t.snapshot()})

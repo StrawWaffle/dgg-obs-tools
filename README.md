@@ -1,18 +1,26 @@
 # dgg-obs-tools
 
-OBS browser sources that draw destiny.gg chat on your stream. It's a single
+OBS browser sources that draw destiny.gg, Kick and YouTube chat on your stream. It's a single
 small program: run it, pick an embed, and paste one URL into OBS.
 
 ## Watchers
 
-Shows the people in destiny.gg chat who have a given embed open (say
-`kick/destiny`, or several embeds at once) as the last emote each of them used, with their name in its
-chat flair colour. Layouts include free float, a safe frame around the edges,
+Shows the people watching a stream (say `kick/destiny`, or several at once)
+as the last emote each of them used, with their name in its chat colour:
+
+- everyone in destiny.gg chat with that embed open, and
+- everyone talking in the stream's own Kick or YouTube chat, who is watching
+  it too. Their emotes are drawn from Kick's and YouTube's own pictures, and a
+  small K or YT mark can show where they're talking (both can be switched off).
+
+Layouts include free float, a safe frame around the edges,
 a bottom rail, side columns and bumper cars, plus options for speed, size,
 entrances and names.
 
-Everything it shows is already public in destiny.gg chat. It connects
-anonymously and needs no login.
+Everything it shows is already public in those chats. It connects anonymously
+and needs no login or API key. Kick and YouTube chat are read the way their own
+web pages read them, which neither site documents, so a change on their side
+can break that part until an update follows.
 
 ## Download
 
@@ -38,9 +46,11 @@ new version.
 
 1. Run `dgg-obs-tools`. It opens its setup page in your browser at
    `http://localhost:7341/`.
-2. Under **Embeds**, enter each embed on its own line as `platform/name`
-   (`kick/destiny`, `youtube/VIDEO_ID`) or paste a `destiny.gg/bigscreen#...`
-   link, then click **Save**. Several embeds are drawn together in one overlay.
+2. Under **Embeds**, enter each embed on its own line as `platform/name`:
+   `kick/destiny`, `youtube/@destiny` (follows whatever that channel has live,
+   stream after stream) or `youtube/VIDEO_ID`. A `destiny.gg/bigscreen#...`
+   link, or a Kick or YouTube link, works too. Click **Save**. Several embeds
+   are drawn together in one overlay.
 3. In OBS add a **Browser** source with the URL `http://localhost:7341/watchers`,
    sized 1920 × 1080.
 

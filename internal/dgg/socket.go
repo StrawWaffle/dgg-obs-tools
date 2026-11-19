@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+
+	"github.com/StrawWaffle/dgg-obs-tools/internal/chat"
 )
 
 // UserAgent names this program to destiny.gg, so whoever runs the servers can
@@ -24,10 +26,6 @@ const (
 	// resets the backoff, or a rejected client would retry at the shortest delay
 	// forever.
 	stableAfter = 5 * time.Second
-
-	retryWindow    = 3 * time.Second
-	retryWindowCap = 60 * time.Second
-	retryMin       = 500 * time.Millisecond
 
 	// Cloudflare cycling a server closes every client on it at once with 1001,
 	// so even a fast retry needs spreading out.
@@ -43,17 +41,6 @@ const (
 	// NAMES carries the whole roster, a few hundred kilobytes at busy times.
 	readLimit = 8 << 20
 )
-
-// retryDelay is chat-gui's backoff: full jitter over a window that doubles with
-// each failed attempt. The jitter matters as much as the backoff, because a
-// mass disconnect releases every client at the same moment.
-func retryDelay(attempts int, random func() float64) time.Duration {
-	window := retryWindowCap
-	if attempts < 6 {
-		window = min(retryWindowCap, retryWindow*time.Duration(1<<attempts))
-	}
-	return retryMin + time.Duration(random()*float64(window-retryMin))
-}
 
 // SocketState is what the setup page shows about the connection.
 type SocketState struct {
@@ -106,9 +93,9 @@ func (s *Socket) Run(ctx context.Context) {
 		case code == websocket.StatusGoingAway && stable:
 			delay = time.Duration(rand.Float64() * float64(goingAwaySpread))
 		case stable:
-			delay = retryDelay(0, rand.Float64)
+			delay = chat.RetryDelay(0, rand.Float64)
 		default:
-			delay = retryDelay(attempts, rand.Float64)
+			delay = chat.RetryDelay(attempts, rand.Float64)
 		}
 
 		select {

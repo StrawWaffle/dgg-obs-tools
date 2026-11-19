@@ -13,20 +13,30 @@ export interface Channel {
   id: string;
 }
 
-/** One person in destiny.gg chat with one of the chosen embeds open. */
+/**
+ * One person watching a followed embed: somebody in destiny.gg chat with it
+ * open, or somebody talking in its own Kick or YouTube chat.
+ */
 export interface Watcher {
   nick: string;
-  /** The flair their name is coloured by, resolved the way chat resolves it. */
+  platform: 'dgg' | 'kick' | 'youtube';
+  /** The destiny.gg flair their name is coloured by, resolved the way chat resolves it. */
   flair: string | null;
-  /** When they last said something, which is also when `watching` was last confirmed. */
+  /** A name colour the platform gives directly (Kick). */
+  color: string | null;
+  /** When they last said something. */
   lastSpokeAt: string | null;
-  /** The last emote they used that their account can use. */
+  /** The last emote they used. A destiny.gg one is drawn by this name. */
   lastEmote: string | null;
+  /** The picture of a Kick or YouTube emote. */
+  emoteUrl: string | null;
 }
 
 export interface WatchersSnapshot {
   /** The embeds followed, drawn together. */
   channels: Channel[];
+  /** For each followed YouTube channel, the live stream found on it, or "". */
+  liveVideos: Record<string, string>;
   /** Everyone on them, which may be more than `watchers` carries. */
   chatCount: number;
   /** Whoever spoke most recently first. */
@@ -68,6 +78,8 @@ export interface OverlayOptions {
   roam: number;
   /** Percent of the frame kept clear at every edge, so nothing is cropped. */
   inset: number;
+  /** A small K or YT before Kick and YouTube names. */
+  marks: 'on' | 'off';
 }
 
 /** How many embeds one overlay can follow; the app enforces the same limit. */
@@ -75,6 +87,8 @@ export const MAX_CHANNELS = 10;
 
 export interface Settings {
   channels: Channel[];
+  /** Whether a Kick or YouTube embed brings the people talking in that stream's own chat. */
+  platformChats: boolean;
   overlay: OverlayOptions;
 }
 
@@ -91,6 +105,7 @@ export const DEFAULT_OVERLAY_OPTIONS: OverlayOptions = {
   size: 100,
   roam: 100,
   inset: 4,
+  marks: 'on',
 };
 
 /** Stands in for anyone who has not used an emote yet. */
@@ -119,19 +134,47 @@ export const LABELS = {
   names: { under: 'Under emote', beside: 'Beside emote', off: 'Hidden' },
   enter: { fade: 'Fade', spin: 'Spin', slide: 'Slide', random: 'Mixed' },
   motion: { drift: 'Wander', bob: 'Bob up and down', orbit: 'Small circles', sway: 'Sway side to side' },
-  color: { flair: 'Chat flair colours', white: 'Plain white' },
+  color: { flair: 'Chat colours', white: 'Plain white' },
+  marks: { on: 'K / YT marks', off: 'No marks' },
 } as const;
 
 /**
- * Reads a channel out of whatever somebody pastes: `kick/dggjams`, or a
- * bigscreen link such as `https://www.destiny.gg/bigscreen#kick/dggJams`.
+ * Reads an embed out of whatever somebody pastes: `kick/destiny`,
+ * `youtube/@destiny`, `youtube/VIDEO_ID`, a destiny.gg bigscreen link such as
+ * `https://www.destiny.gg/bigscreen#kick/destiny`, or a Kick or YouTube link.
+ * A YouTube video id keeps its case, which matters; everything else is
+ * lowercased, as chat reports it.
  */
 export function parseChannel(input: string): Channel | null {
   const text = input.trim();
+  const fromLink = channelFromLink(text);
+  if (fromLink) return fromLink;
+
   const fragment = text.includes('#') ? text.slice(text.indexOf('#') + 1) : text;
   const [platform, ...rest] = fragment.split('/');
-  const id = rest.join('/').trim().toLowerCase();
+  const id = rest.join('/').trim();
   const known = platforms.find((value) => value === platform.trim().toLowerCase());
   if (!known || !id) return null;
-  return { platform: known, id };
+  return { platform: known, id: known === 'youtube' && VIDEO_ID.test(id) ? id : id.toLowerCase() };
+}
+
+const VIDEO_ID = /^[\w-]{11}$/;
+
+function channelFromLink(text: string): Channel | null {
+  let url: URL;
+  try {
+    url = new URL(text);
+  } catch {
+    return null;
+  }
+  const host = url.hostname.replace(/^www\./, '').replace(/^m\./, '');
+  const path = url.pathname.split('/').filter(Boolean);
+  if (host === 'kick.com' && path[0]) return { platform: 'kick', id: path[0].toLowerCase() };
+  if (host === 'youtu.be' && path[0] && VIDEO_ID.test(path[0])) return { platform: 'youtube', id: path[0] };
+  if (host === 'youtube.com') {
+    const video = url.searchParams.get('v') ?? (path[0] === 'live' ? path[1] : null);
+    if (video && VIDEO_ID.test(video)) return { platform: 'youtube', id: video };
+    if (path[0]?.startsWith('@')) return { platform: 'youtube', id: path[0].toLowerCase() };
+  }
+  return null;
 }

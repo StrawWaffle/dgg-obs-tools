@@ -2,6 +2,8 @@ package dgg
 
 import (
 	"encoding/json"
+
+	"github.com/StrawWaffle/dgg-obs-tools/internal/chat"
 	"sort"
 	"strings"
 	"time"
@@ -68,25 +70,6 @@ func (u chatUser) watchesAny(channels map[Channel]bool) bool {
 		channels[Channel{Platform: u.Watching.Platform, ID: strings.ToLower(u.Watching.ID)}]
 }
 
-// Watcher is one person in chat with the channel's embed open.
-type Watcher struct {
-	Nick string `json:"nick"`
-	// The flair their name is coloured by, or null.
-	Flair *string `json:"flair"`
-	// When they last spoke, which is also when `watching` was last confirmed:
-	// switching embeds is not broadcast, so it is only seen when they talk.
-	LastSpokeAt *time.Time `json:"lastSpokeAt"`
-	// The last emote they used that their account can use, or null.
-	LastEmote *string `json:"lastEmote"`
-}
-
-func optional(value string) *string {
-	if value == "" {
-		return nil
-	}
-	return &value
-}
-
 // EmoteReader finds the emote in a message, or "".
 type EmoteReader func(text string, subTier int) string
 
@@ -100,24 +83,26 @@ type EmoteReader func(text string, subTier int) string
 type Roster struct {
 	channels  map[Channel]bool
 	readEmote EmoteReader
-	watchers  map[string]Watcher
+	watchers  map[string]chat.Watcher
 }
 
 // NewRoster starts an empty roster for the given channels.
 func NewRoster(channels []Channel, readEmote EmoteReader) *Roster {
 	set := make(map[Channel]bool, len(channels))
 	for _, channel := range channels {
+		// destiny.gg chat reports every id lowercase, YouTube's included.
+		channel.ID = strings.ToLower(channel.ID)
 		set[channel] = true
 	}
-	return &Roster{channels: set, readEmote: readEmote, watchers: map[string]Watcher{}}
+	return &Roster{channels: set, readEmote: readEmote, watchers: map[string]chat.Watcher{}}
 }
 
 // Len is how many people are on the channels.
 func (r *Roster) Len() int { return len(r.watchers) }
 
 // List puts whoever spoke most recently first, then everyone else by name.
-func (r *Roster) List() []Watcher {
-	list := make([]Watcher, 0, len(r.watchers))
+func (r *Roster) List() []chat.Watcher {
+	list := make([]chat.Watcher, 0, len(r.watchers))
 	for _, watcher := range r.watchers {
 		list = append(list, watcher)
 	}
@@ -164,16 +149,17 @@ func (r *Roster) applyNames(data json.RawMessage) {
 	if json.Unmarshal(data, &names) != nil {
 		return
 	}
-	rebuilt := make(map[string]Watcher, len(r.watchers))
+	rebuilt := make(map[string]chat.Watcher, len(r.watchers))
 	for _, user := range names.Users {
 		if user.Nick == "" || !user.watchesAny(r.channels) {
 			continue
 		}
 		key := strings.ToLower(user.Nick)
 		known := r.watchers[key]
-		rebuilt[key] = Watcher{
+		rebuilt[key] = chat.Watcher{
+			Platform:    chat.DGG,
 			Nick:        user.Nick,
-			Flair:       optional(ResolveFlair(user.Features)),
+			Flair:       chat.Optional(ResolveFlair(user.Features)),
 			LastSpokeAt: known.LastSpokeAt,
 			LastEmote:   known.LastEmote,
 		}
@@ -231,9 +217,10 @@ func (r *Roster) setUser(user chatUser, spokeAt *time.Time) {
 			emote = &found
 		}
 	}
-	r.watchers[key] = Watcher{
+	r.watchers[key] = chat.Watcher{
+		Platform:    chat.DGG,
 		Nick:        user.Nick,
-		Flair:       optional(ResolveFlair(user.Features)),
+		Flair:       chat.Optional(ResolveFlair(user.Features)),
 		LastSpokeAt: spoken,
 		LastEmote:   emote,
 	}

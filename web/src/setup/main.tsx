@@ -23,6 +23,7 @@ const CHOICES: { name: ChoiceField; label: string }[] = [
   { name: 'enter', label: 'Arrive' },
   { name: 'motion', label: 'Move' },
   { name: 'color', label: 'Name colour' },
+  { name: 'marks', label: 'Platform marks' },
 ];
 
 const NUMBERS: { name: NumberField; label: string; hint: string }[] = [
@@ -41,7 +42,13 @@ function channelsText(settings: Settings): string {
 function chatStatus(snapshot: WatchersSnapshot | null, reachable: boolean): string {
   if (!reachable) return 'The app is not running. Start it again and this page reconnects.';
   if (!snapshot?.channels.length) return 'Choose an embed to start.';
-  const where = snapshot.channels.map((channel) => `${channel.platform}/${channel.id}`).join(', ');
+  const where = snapshot.channels
+    .map((channel) => {
+      const name = `${channel.platform}/${channel.id}`;
+      if (!(channel.id in snapshot.liveVideos)) return name;
+      return snapshot.liveVideos[channel.id] ? `${name} (live)` : `${name} (not live)`;
+    })
+    .join(', ');
   if (!snapshot.connected) return `Connecting to destiny.gg chat for ${where}…`;
   const people = snapshot.chatCount === 1 ? '1 person' : `${snapshot.chatCount} people`;
   return `Connected. ${people} in chat on ${where}.`;
@@ -117,6 +124,7 @@ function SetupPage() {
   const { settings, snapshot, reachable } = useAppEvents();
   const update = useUpdateState();
   const [channels, setChannels] = useState('');
+  const [platformChats, setPlatformChats] = useState(true);
   const [overlay, setOverlay] = useState<OverlayOptions | null>(null);
   const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
   const [copied, setCopied] = useState(false);
@@ -125,6 +133,7 @@ function SetupPage() {
   useEffect(() => {
     if (settings && overlay === null) {
       setChannels(channelsText(settings));
+      setPlatformChats(settings.platformChats);
       setOverlay(settings.overlay);
     }
   }, [settings, overlay]);
@@ -151,7 +160,7 @@ function SetupPage() {
     const response = await fetch('/api/settings', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ channels: parsed, overlay } satisfies Settings),
+      body: JSON.stringify({ channels: parsed, platformChats, overlay } satisfies Settings),
     }).catch(() => null);
     if (!response?.ok) {
       setMessage({ text: response ? await response.text() : 'The app is not answering.', error: true });
@@ -216,10 +225,18 @@ function SetupPage() {
             />
           </label>
           <p className="hint">
-            Each as platform/name, such as kick/destiny or youtube/VIDEO_ID, or a link like
-            https://www.destiny.gg/bigscreen#kick/destiny. Several embeds are drawn together in one
-            overlay.
+            Each as platform/name: kick/destiny, youtube/@destiny (follows whatever that channel has
+            live) or youtube/VIDEO_ID. A destiny.gg bigscreen link, or a Kick or YouTube link, works
+            too. Several embeds are drawn together in one overlay.
           </p>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={platformChats}
+              onChange={(event) => setPlatformChats(event.currentTarget.checked)}
+            />
+            Also draw people talking in a Kick or YouTube embed's own chat
+          </label>
         </section>
 
         <section>

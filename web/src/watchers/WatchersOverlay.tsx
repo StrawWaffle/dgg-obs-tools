@@ -36,14 +36,22 @@ export function chooseWatchers(
     return watcher.lastSpokeAt !== null && new Date(watcher.lastSpokeAt).getTime() >= since;
   });
 
-  const byNick = new Map(eligible.map((watcher) => [watcher.nick, watcher]));
+  const byNick = new Map(eligible.map((watcher) => [who(watcher), watcher]));
   const held = new Set(previous);
   const kept = previous
     .map((nick) => byNick.get(nick))
     .filter((watcher): watcher is Watcher => watcher !== undefined);
-  const arriving = eligible.filter((watcher) => !held.has(watcher.nick));
+  const arriving = eligible.filter((watcher) => !held.has(who(watcher)));
 
   return [...kept, ...arriving].slice(0, options.max);
+}
+
+/**
+ * Who somebody is. The same name on destiny.gg and Kick is two people, so the
+ * platform is part of it.
+ */
+export function who(watcher: Watcher): string {
+  return `${watcher.platform}/${watcher.nick.toLowerCase()}`;
 }
 
 function hashNick(nick: string): number {
@@ -61,28 +69,28 @@ export function assignStableSlots(
   slotCount: number,
   slots: Map<string, number>,
 ): Map<string, number> {
-  const active = new Set(watchers.map(({ watcher }) => watcher.nick));
+  const active = new Set(watchers.map(({ watcher }) => who(watcher)));
   for (const nick of slots.keys()) {
     if (!active.has(nick)) slots.delete(nick);
   }
 
   const occupied = new Set<number>();
   for (const { watcher } of watchers) {
-    const slot = slots.get(watcher.nick);
+    const slot = slots.get(who(watcher));
     if (slot === undefined || slot >= slotCount || occupied.has(slot)) {
-      slots.delete(watcher.nick);
+      slots.delete(who(watcher));
       continue;
     }
     occupied.add(slot);
   }
 
   for (const { watcher } of watchers) {
-    if (slots.has(watcher.nick)) continue;
-    const first = Math.abs(hashNick(watcher.nick)) % slotCount;
+    if (slots.has(who(watcher))) continue;
+    const first = Math.abs(hashNick(who(watcher))) % slotCount;
     for (let offset = 0; offset < slotCount; offset += 1) {
       const slot = (first + offset) % slotCount;
       if (occupied.has(slot)) continue;
-      slots.set(watcher.nick, slot);
+      slots.set(who(watcher), slot);
       occupied.add(slot);
       break;
     }
@@ -295,9 +303,9 @@ export function mergeRendered(
   chosen: Watcher[],
   now: number,
 ): RenderedWatcher[] {
-  const drawn = new Set(chosen.map((watcher) => watcher.nick));
+  const drawn = new Set(chosen.map((watcher) => who(watcher)));
   const leaving = previous
-    .filter((entry) => !drawn.has(entry.watcher.nick))
+    .filter((entry) => !drawn.has(who(entry.watcher)))
     .map((entry) => (entry.leavingSince === null ? { ...entry, leavingSince: now } : entry))
     .filter((entry) => now - (entry.leavingSince ?? now) < LEAVE_MS);
 
@@ -307,7 +315,7 @@ export function mergeRendered(
   ];
 }
 
-/** One emote, looped where destiny.gg already repeats it. */
+/** One destiny.gg emote, looped where destiny.gg already repeats it. */
 function Emote({ prefix }: { prefix: string }) {
   const element = useRef<HTMLSpanElement>(null);
 
@@ -318,6 +326,23 @@ function Emote({ prefix }: { prefix: string }) {
 
   return <span ref={element} className={`emote ${prefix}`} />;
 }
+
+/**
+ * A Kick or YouTube emote, drawn from the picture its platform serves. The app
+ * only passes on plain https addresses, so the URL is safe inside url().
+ */
+function PictureEmote({ name, url }: { name: string; url: string }) {
+  return (
+    <span
+      role="img"
+      aria-label={name}
+      className="emote-picture"
+      style={{ backgroundImage: `url("${url}")` }}
+    />
+  );
+}
+
+const MARKS: Record<string, string> = { kick: 'K', youtube: 'YT' };
 
 const EMOTE_STYLESHEET = 'https://r2cdn.destiny.gg/emotes/emotes.css';
 
@@ -357,7 +382,7 @@ export default function WatchersOverlay({
   const rendered = useRef<RenderedWatcher[]>([]);
   const onScreen = rendered.current
     .filter((entry) => entry.leavingSince === null)
-    .map((entry) => entry.watcher.nick);
+    .map((entry) => who(entry.watcher));
   const watchers = chooseWatchers(snapshot?.watchers ?? [], options, Date.now(), onScreen);
   rendered.current = mergeRendered(rendered.current, watchers, Date.now());
 
@@ -400,19 +425,19 @@ export default function WatchersOverlay({
     >
       {rendered.current.map(({ watcher, leavingSince }) => (
         <div
-          key={watcher.nick}
+          key={who(watcher)}
           ref={(element) => {
-            if (element) elements.current.set(watcher.nick, element);
-            else elements.current.delete(watcher.nick);
+            if (element) elements.current.set(who(watcher), element);
+            else elements.current.delete(who(watcher));
           }}
           className={[
             'watcher',
             leavingSince === null ? '' : 'watcher-leaving',
-            `enter-${entranceFor(watcher.nick, options.enter)}`,
+            `enter-${entranceFor(who(watcher), options.enter)}`,
           ]
             .filter(Boolean)
             .join(' ')}
-          style={positionOf(watcher.nick)}
+          style={positionOf(who(watcher))}
         >
           <div className="watcher-body">
             {/*
@@ -423,7 +448,11 @@ export default function WatchersOverlay({
               overlay drew the entire sprite sheet in a row.
             */}
             <span className="text">
-              <Emote prefix={watcher.lastEmote ?? DEFAULT_EMOTE} />
+              {watcher.emoteUrl ? (
+                <PictureEmote name={watcher.lastEmote ?? ''} url={watcher.emoteUrl} />
+              ) : (
+                <Emote prefix={watcher.lastEmote ?? DEFAULT_EMOTE} />
+              )}
             </span>
             {options.names !== 'off' && (
               <span
@@ -435,7 +464,15 @@ export default function WatchersOverlay({
                     ? `watcher-name flair-${watcher.flair}`
                     : 'watcher-name'
                 }
+                // Kick gives each name a colour of its own, which is what its
+                // chat shows; destiny.gg's come from the flair class instead.
+                style={watcher.color && options.color === 'flair' ? { color: watcher.color } : undefined}
               >
+                {options.marks === 'on' && MARKS[watcher.platform] && (
+                  <span className={`platform-mark platform-${watcher.platform}`}>
+                    {MARKS[watcher.platform]}
+                  </span>
+                )}
                 {watcher.nick}
               </span>
             )}

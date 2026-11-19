@@ -8,10 +8,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 
 	"github.com/StrawWaffle/dgg-obs-tools/internal/dgg"
+	"github.com/StrawWaffle/dgg-obs-tools/internal/youtube"
 )
 
 // The platforms destiny.gg embeds, spelled the way a chatter's `watching` spells them.
@@ -24,6 +26,7 @@ var (
 	entrances = []string{"fade", "spin", "slide", "random"}
 	motions   = []string{"drift", "bob", "orbit", "sway"}
 	colors    = []string{"flair", "white"}
+	switches  = []string{"on", "off"}
 )
 
 // Overlay is how the watchers overlay draws. The web side has the same shape
@@ -41,20 +44,25 @@ type Overlay struct {
 	Size   int    `json:"size"`
 	Roam   int    `json:"roam"`
 	Inset  int    `json:"inset"`
+	// Whether Kick and YouTube names carry a small K or YT.
+	Marks string `json:"marks"`
 }
 
 // Settings is everything the setup page saves.
 type Settings struct {
 	// The embeds whose watchers are drawn, together. Empty before any is chosen.
 	Channels []dgg.Channel `json:"channels"`
-	Overlay  Overlay       `json:"overlay"`
+	// Whether a Kick or YouTube embed brings the people talking in that
+	// stream's own chat, beside destiny.gg's watchers of it.
+	PlatformChats bool    `json:"platformChats"`
+	Overlay       Overlay `json:"overlay"`
 }
 
 // Default is a fresh install.
 func Default() Settings {
-	return Settings{Channels: []dgg.Channel{}, Overlay: Overlay{
+	return Settings{Channels: []dgg.Channel{}, PlatformChats: true, Overlay: Overlay{
 		Show: "speakers", Window: 10, Max: 12, Layout: "float", Names: "under",
-		Enter: "fade", Motion: "drift", Color: "flair", Speed: 100, Size: 100, Roam: 100, Inset: 4,
+		Enter: "fade", Motion: "drift", Color: "flair", Speed: 100, Size: 100, Roam: 100, Inset: 4, Marks: "on",
 	}}
 }
 
@@ -72,6 +80,8 @@ func within(field string, value, low, high int) error {
 	return nil
 }
 
+var youtubeHandle = regexp.MustCompile(`^@[\w.-]{3,30}$`)
+
 // MaxChannels is how many embeds one overlay follows. Enough for a co-stream
 // or a watch party; more would only be a wall of faces.
 const MaxChannels = 10
@@ -83,12 +93,20 @@ func (s *Settings) Validate() error {
 	}
 	channels := make([]dgg.Channel, 0, len(s.Channels))
 	for _, channel := range s.Channels {
-		channel.ID = strings.ToLower(strings.TrimSpace(channel.ID))
+		channel.ID = strings.TrimSpace(channel.ID)
 		if err := oneOf("platform", channel.Platform, Platforms); err != nil {
 			return err
 		}
 		if channel.ID == "" || len(channel.ID) > 120 {
 			return errors.New("each embed needs a name of up to 120 characters")
+		}
+		// A YouTube video id is case sensitive; everything else, a YouTube
+		// handle included, is not, and is kept lowercase so it compares.
+		if channel.Platform != "youtube" || !youtube.IsVideoID(channel.ID) {
+			channel.ID = strings.ToLower(channel.ID)
+		}
+		if channel.Platform == "youtube" && !youtube.IsVideoID(channel.ID) && !youtubeHandle.MatchString(channel.ID) {
+			return fmt.Errorf("%q is neither a YouTube video id nor a channel handle such as @destiny", channel.ID)
 		}
 		if !slices.Contains(channels, channel) {
 			channels = append(channels, channel)
@@ -109,6 +127,7 @@ func (s *Settings) Validate() error {
 		within("size", o.Size, 25, 400),
 		within("roam", o.Roam, 0, 300),
 		within("inset", o.Inset, 0, 25),
+		oneOf("marks", o.Marks, switches),
 	)
 }
 
