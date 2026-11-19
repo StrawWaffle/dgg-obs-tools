@@ -183,7 +183,7 @@ func TestRetryDelayStaysInItsWindow(t *testing.T) {
 func TestChatMessage(t *testing.T) {
 	catalogue := testCatalogue(t)
 	watching := func(c Channel) bool { return c == dggjams }
-	message, ok := ChatMessage(frame(t, `MSG {"nick":"Anpan","features":["subscriber"],"timestamp":1700000000000,"data":"/me catJAM PepoTurkey https://x.y","watching":{"platform":"kick","id":"DGGJams"},"subscription":{"tier":1}}`), catalogue, watching)
+	message, ok := ChatMessage(frame(t, `MSG {"nick":"Anpan","features":["subscriber"],"timestamp":1700000000000,"data":"/me catJAM PepoTurkey https://x.y","watching":{"platform":"kick","id":"DGGJams"},"subscription":{"tier":1}}`), catalogue, testFlairs(t), watching)
 	if !ok {
 		t.Fatal("message dropped")
 	}
@@ -200,7 +200,10 @@ func TestChatMessage(t *testing.T) {
 			t.Fatalf("parts %+v", message.Parts)
 		}
 	}
-	again, _ := ChatMessage(frame(t, `MSG {"nick":"Anpan","timestamp":1700000000000,"data":"/me catJAM PepoTurkey https://x.y"}`), catalogue, watching)
+	if len(message.Badges) != 1 || message.Badges[0].Label != "Tier 1 Subscriber" {
+		t.Fatalf("badges %+v", message.Badges)
+	}
+	again, _ := ChatMessage(frame(t, `MSG {"nick":"Anpan","timestamp":1700000000000,"data":"/me catJAM PepoTurkey https://x.y"}`), catalogue, nil, watching)
 	if again.ID != message.ID {
 		t.Fatal("the same message got two ids, so a reconnect's backlog would repeat it")
 	}
@@ -210,5 +213,29 @@ func TestChatRemoval(t *testing.T) {
 	removal, ok := ChatRemoval(frame(t, `MUTE {"nick":"Bot","data":"Troll","duration":600}`))
 	if !ok || removal.Nick != "Troll" || removal.Platform != "dgg" {
 		t.Fatalf("got %+v", removal)
+	}
+}
+
+func testFlairs(t *testing.T) Flairs {
+	t.Helper()
+	flairs, err := ParseFlairs([]byte(`[
+		{"name":"subscriber","label":"Tier 1 Subscriber","hidden":false,"priority":5,"image":[{"url":"https://r2cdn.destiny.gg/flairs/sub.png","width":16,"height":16}]},
+		{"name":"flair17","label":"Micro","hidden":true,"priority":1,"image":[{"url":"https://r2cdn.destiny.gg/flairs/m.png","width":20,"height":18}]}
+	]`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return flairs
+}
+
+func TestBadgesSkipHiddenFlairsAndFollowPriority(t *testing.T) {
+	flairs, _ := ParseFlairs([]byte(`[
+		{"name":"b","label":"B","priority":9,"image":[{"url":"https://x.y/b.png"}]},
+		{"name":"a","label":"A","priority":2,"image":[{"url":"https://x.y/a.png"}]},
+		{"name":"h","label":"H","hidden":true,"priority":1,"image":[{"url":"https://x.y/h.png"}]}
+	]`))
+	badges := flairs.Badges([]string{"b", "h", "a", "unknown"})
+	if len(badges) != 2 || badges[0].Label != "A" || badges[1].Label != "B" {
+		t.Fatalf("got %+v", badges)
 	}
 }

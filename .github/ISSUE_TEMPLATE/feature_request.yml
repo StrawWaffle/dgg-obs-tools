@@ -1,0 +1,23 @@
+name: Feature request
+description: Something new for the overlay, the chat or the app.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you'd like
+      description: What it should do, and where (watchers overlay, chat, setup page, something new).
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: What it's for
+      description: How you'd use it on stream or while watching. This helps more than a detailed design.
+    validations:
+      required: true
+  - type: textarea
+    id: example
+    attributes:
+      label: Anything like it elsewhere
+      description: Another tool, site or overlay that does something similar, if there is one.

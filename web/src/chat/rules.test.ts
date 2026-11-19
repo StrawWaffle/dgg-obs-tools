@@ -1,14 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatMessage, ChatOptions } from '../watchers/options';
-import { highlighted, linkText, shown, visible } from './rules';
+import { censor, highlighted, linkText, shown, visible } from './rules';
 
 const OPTIONS: ChatOptions = {
   dgg: 'all',
   kick: true,
   youtube: true,
+  twitch: true,
   size: 100,
   shadow: 'soft',
   icons: 'on',
+  badges: 'on',
+  censor: 'off',
   highlights: [],
   highlightWatching: 'on',
   links: 'short',
@@ -76,5 +79,16 @@ describe('links', () => {
     );
     expect(linkText('https://x.y/a', 'short')).toBe('https://x.y/a');
     expect(linkText('https://www.example.com/a/very/long/path/that/goes/on', 'full')).toContain('https://');
+  });
+});
+
+describe('censoring', () => {
+  it('stars out swear words after their first letter, whatever their case', () => {
+    expect(censor('what the FUCKING hell')).toBe('what the F****** hell');
+    expect(censor('oh shit')).toBe('oh s***');
+  });
+
+  it('leaves words that only contain a short one alone', () => {
+    expect(censor('spicy cockpit scumbag')).toBe('spicy cockpit scumbag');
   });
 });

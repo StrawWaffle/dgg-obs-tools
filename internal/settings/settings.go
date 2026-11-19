@@ -58,14 +58,19 @@ type Chat struct {
 	// Which destiny.gg messages it shows: everything, only from people
 	// watching one of the followed embeds, or none.
 	DGG string `json:"dgg"`
-	// Whether the followed Kick and YouTube chats show.
+	// Whether the followed Kick, YouTube and Twitch chats show.
 	Kick    bool `json:"kick"`
 	YouTube bool `json:"youtube"`
+	Twitch  bool `json:"twitch"`
 	// Percent of the standard size, text and emotes together.
 	Size   int    `json:"size"`
 	Shadow string `json:"shadow"`
 	// The small platform icon before each name.
 	Icons string `json:"icons"`
+	// destiny.gg's flair badges beside names, as its chat shows them.
+	Badges string `json:"badges"`
+	// Whether swear words and slurs are starred out.
+	Censor string `json:"censor"`
 	// Phrases that highlight a message, one per entry, matched without case.
 	Highlights []string `json:"highlights"`
 	// Whether destiny.gg messages from people watching a followed embed stand out.
@@ -89,24 +94,27 @@ type Settings struct {
 	// YouTube chats to read: a channel handle such as "@destiny", followed
 	// from stream to stream, or one video id.
 	YouTubeChats []string `json:"youtubeChats"`
-	Overlay      Overlay  `json:"overlay"`
-	Chat         Chat     `json:"chat"`
+	// Twitch channels whose chat is read, by login.
+	TwitchChats []string `json:"twitchChats"`
+	Overlay     Overlay  `json:"overlay"`
+	Chat        Chat     `json:"chat"`
 }
 
 // Default is a fresh install.
 func Default() Settings {
-	return Settings{Embeds: []dgg.Channel{}, KickChats: []string{}, YouTubeChats: []string{}, Overlay: Overlay{
+	return Settings{Embeds: []dgg.Channel{}, KickChats: []string{}, YouTubeChats: []string{}, TwitchChats: []string{}, Overlay: Overlay{
 		Show: "speakers", Window: 10, Max: 12, Layout: "float", Names: "under",
 		Enter: "fade", Motion: "drift", Color: "flair", Speed: 100, Size: 100, Roam: 100, Inset: 4, Marks: "on",
 	}, Chat: Chat{
-		DGG: "all", Kick: true, YouTube: true, Size: 100, Shadow: "soft", Icons: "on",
+		DGG: "all", Kick: true, YouTube: true, Twitch: true, Size: 100, Shadow: "soft", Icons: "on",
+		Badges: "on", Censor: "off",
 		Highlights: []string{}, HighlightWatching: "on", Links: "short", Removed: "hide", Lines: 150,
 	}}
 }
 
 // Empty reports whether nothing at all is followed.
 func (s Settings) Empty() bool {
-	return len(s.Embeds) == 0 && len(s.KickChats) == 0 && len(s.YouTubeChats) == 0
+	return len(s.Embeds) == 0 && len(s.KickChats) == 0 && len(s.YouTubeChats) == 0 && len(s.TwitchChats) == 0
 }
 
 func oneOf(field, value string, allowed []string) error {
@@ -126,6 +134,7 @@ func within(field string, value, low, high int) error {
 var (
 	youtubeHandle = regexp.MustCompile(`^@[\w.-]{3,30}$`)
 	kickSlug      = regexp.MustCompile(`^[a-z0-9_-]{1,40}$`)
+	twitchLogin   = regexp.MustCompile(`^[a-z0-9_]{3,25}$`)
 )
 
 // MaxPerList is how many embeds, or chats of one platform, an overlay
@@ -160,7 +169,7 @@ func unique[T comparable](items []T) []T {
 // Validate checks every field, lowercases names that are not case sensitive
 // and drops repeats.
 func (s *Settings) Validate() error {
-	if len(s.Embeds) > MaxPerList || len(s.KickChats) > MaxPerList || len(s.YouTubeChats) > MaxPerList {
+	if len(s.Embeds) > MaxPerList || len(s.KickChats) > MaxPerList || len(s.YouTubeChats) > MaxPerList || len(s.TwitchChats) > MaxPerList {
 		return fmt.Errorf("at most %d embeds, and %d chats on each platform", MaxPerList, MaxPerList)
 	}
 
@@ -208,6 +217,16 @@ func (s *Settings) Validate() error {
 	}
 	s.YouTubeChats = unique(videos)
 
+	logins := make([]string, 0, len(s.TwitchChats))
+	for _, login := range s.TwitchChats {
+		login = strings.ToLower(strings.TrimSpace(login))
+		if !twitchLogin.MatchString(login) {
+			return fmt.Errorf("%q is not a Twitch channel name", login)
+		}
+		logins = append(logins, login)
+	}
+	s.TwitchChats = unique(logins)
+
 	c := &s.Chat
 	if len(c.Highlights) > 50 {
 		return errors.New("at most 50 highlighted phrases")
@@ -231,6 +250,8 @@ func (s *Settings) Validate() error {
 		within("chat size", c.Size, 50, 300),
 		oneOf("chat shadow", c.Shadow, shadows),
 		oneOf("chat icons", c.Icons, switches),
+		oneOf("chat badges", c.Badges, switches),
+		oneOf("chat censor", c.Censor, switches),
 		oneOf("chat highlightWatching", c.HighlightWatching, switches),
 		oneOf("chat links", c.Links, linkStyle),
 		oneOf("chat removed", c.Removed, removed),

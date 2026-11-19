@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseChannel, parseKickChat, parseYouTubeChat } from './options';
+import { parseChannel, parseKickChat, parseTwitchChat, parseYouTubeChat } from './options';
 
 describe('reading an embed out of what somebody pastes', () => {
   it('takes platform/name, lowercased', () => {
@@ -42,5 +42,15 @@ describe('reading a Kick or YouTube chat', () => {
     expect(parseYouTubeChat('P7Xv5DdqL0k')).toBe('P7Xv5DdqL0k');
     expect(parseYouTubeChat('https://www.youtube.com/watch?v=P7Xv5DdqL0k')).toBe('P7Xv5DdqL0k');
     expect(parseYouTubeChat('destiny')).toBeNull();
+  });
+});
+
+describe('reading a Twitch chat', () => {
+  it('takes a name, with or without the platform, or a link', () => {
+    expect(parseTwitchChat('xQc')).toBe('xqc');
+    expect(parseTwitchChat('twitch/xqc')).toBe('xqc');
+    expect(parseTwitchChat('https://www.twitch.tv/xqc')).toBe('xqc');
+    expect(parseTwitchChat('https://kick.com/xqc')).toBeNull();
+    expect(parseTwitchChat('x')).toBeNull();
   });
 });

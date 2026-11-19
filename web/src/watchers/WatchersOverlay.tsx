@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { spawnBody, stepBumpers, type BumperBody } from './bumperMotion';
+import { readableColor } from '../color';
 import { useEmoteStylesheetVersion } from '../emoteStylesheet';
 import { PlatformIcon } from '../platform';
 import { loopRepeatingAnimations } from './loopRepeating';
@@ -452,7 +453,7 @@ export default function WatchersOverlay({
                 }
                 // Kick gives each name a colour of its own, which is what its
                 // chat shows; destiny.gg's come from the flair class instead.
-                style={watcher.color && options.color === 'flair' ? { color: watcher.color } : undefined}
+                style={watcher.color && options.color === 'flair' ? { color: readableColor(watcher.color) } : undefined}
               >
                 {options.marks === 'on' && watcher.platform !== 'dgg' && (
                   <PlatformIcon platform={watcher.platform} />

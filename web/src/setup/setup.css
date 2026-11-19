@@ -215,3 +215,25 @@ label.check {
 label.highlights {
   margin-top: 16px;
 }
+
+.page-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 24px;
+}
+
+.page-head nav {
+  display: flex;
+  gap: 16px;
+  font-size: 13px;
+}
+
+.page-head nav a {
+  color: var(--muted);
+}
+
+.page-head nav a:hover {
+  color: var(--text);
+}

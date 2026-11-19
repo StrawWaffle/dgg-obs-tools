@@ -17,7 +17,7 @@ import (
 // destiny.gg messages carry no id, so one is made from who said what when.
 // That also lets the backlog chat sends on every connect be told apart from
 // messages already seen.
-func ChatMessage(frame Frame, catalogue *Catalogue, watching func(Channel) bool) (chat.Message, bool) {
+func ChatMessage(frame Frame, catalogue *Catalogue, flairs Flairs, watching func(Channel) bool) (chat.Message, bool) {
 	if frame.Event != "MSG" || frame.Data == nil {
 		return chat.Message{}, false
 	}
@@ -37,6 +37,7 @@ func ChatMessage(frame Frame, catalogue *Catalogue, watching func(Channel) bool)
 		Source:   "destiny.gg",
 		Nick:     user.Nick,
 		Flair:    chat.Optional(ResolveFlair(user.Features)),
+		Badges:   flairs.Badges(user.Features),
 		At:       at.UTC(),
 	}
 	if rest, ok := strings.CutPrefix(text, "/me "); ok {

@@ -18,6 +18,8 @@ type Message struct {
 	Color  *string   `json:"color"`
 	At     time.Time `json:"at"`
 	Parts  []Part    `json:"parts"`
+	// The destiny.gg flair badges chat shows beside the name.
+	Badges []Badge `json:"badges,omitempty"`
 	// A destiny.gg /me message, drawn in italics.
 	Action bool `json:"action,omitempty"`
 	// A destiny.gg message starting with ">", drawn green as chat does.
@@ -30,6 +32,14 @@ type Message struct {
 	// The YouTube channel id of the sender, so a ban on them can find their
 	// messages. Never sent to a page.
 	AuthorID string `json:"-"`
+}
+
+// Badge is a small picture beside a name, such as a destiny.gg flair.
+type Badge struct {
+	Label  string `json:"label"`
+	URL    string `json:"url"`
+	Width  int    `json:"width"`
+	Height int    `json:"height"`
 }
 
 // Part is one piece of a message: plain text, an emote, or a link.

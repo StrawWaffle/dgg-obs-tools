@@ -21,7 +21,7 @@ func (t *Tracker) chatFrame(frame dgg.Frame) {
 		frames = backlog
 	}
 	for _, f := range frames {
-		if message, ok := dgg.ChatMessage(f, t.catalogue, t.isWatching); ok {
+		if message, ok := dgg.ChatMessage(f, t.catalogue, t.flairs, t.isWatching); ok {
 			t.add(message)
 		}
 		if removal, ok := dgg.ChatRemoval(f); ok {
@@ -40,7 +40,7 @@ func (t *Tracker) isWatching(channel dgg.Channel) bool {
 	return false
 }
 
-// say records a Kick or YouTube message.
+// say records a Kick, YouTube or Twitch message.
 func (t *Tracker) say(ctx context.Context, message chat.Message) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -99,7 +99,7 @@ func (t *Tracker) applyRemoval(removal chat.Removal) {
 	}
 }
 
-// forgetUnfollowedMessages drops Kick and YouTube messages from chats no
+// forgetUnfollowedMessages drops Kick, YouTube and Twitch messages from chats no
 // longer followed. destiny.gg is one chat, so its messages stay.
 // Called with t.mu held.
 func (t *Tracker) forgetUnfollowedMessages() {
@@ -109,6 +109,8 @@ func (t *Tracker) forgetUnfollowedMessages() {
 			return !slices.Contains(t.settings.KickChats, message.Source)
 		case chat.YouTube:
 			return !slices.Contains(t.settings.YouTubeChats, message.Source)
+		case chat.Twitch:
+			return !slices.Contains(t.settings.TwitchChats, message.Source)
 		}
 		return false
 	})

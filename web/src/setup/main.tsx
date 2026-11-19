@@ -11,6 +11,7 @@ import {
   NUMBER_RANGES,
   parseChannel,
   parseKickChat,
+  parseTwitchChat,
   parseYouTubeChat,
   type ChatOptions,
   type OverlayOptions,
@@ -46,6 +47,7 @@ interface Lists {
   embeds: string;
   kickChats: string;
   youtubeChats: string;
+  twitchChats: string;
 }
 
 function listsText(settings: Settings): Lists {
@@ -53,6 +55,7 @@ function listsText(settings: Settings): Lists {
     embeds: settings.embeds.map((embed) => `${embed.platform}/${embed.id}`).join('\n'),
     kickChats: settings.kickChats.join('\n'),
     youtubeChats: settings.youtubeChats.join('\n'),
+    twitchChats: settings.twitchChats.join('\n'),
   };
 }
 
@@ -73,6 +76,7 @@ function chatStatus(snapshot: WatchersSnapshot | null, reachable: boolean): stri
     ...snapshot.embeds.map((embed) => withLive(`${embed.platform}/${embed.id} on destiny.gg`, embed.id, snapshot)),
     ...snapshot.kickChats.map((slug) => `Kick chat ${slug}`),
     ...snapshot.youtubeChats.map((entry) => withLive(`YouTube chat ${entry}`, entry, snapshot)),
+    ...snapshot.twitchChats.map((login) => `Twitch chat ${login}`),
   ];
   if (followed.length === 0) return 'Choose an embed or a chat to start.';
   if (snapshot.embeds.length > 0 && !snapshot.connected) {
@@ -212,12 +216,16 @@ function SourceUrl({ title, path, hint, open }: { title: string; path: string; h
   );
 }
 
+const REPOSITORY = 'https://github.com/StrawWaffle/dgg-obs-tools';
+
 type ChatChoice = keyof typeof CHAT_LABELS;
 
 const CHAT_CHOICES: { name: ChatChoice; label: string }[] = [
   { name: 'dgg', label: 'destiny.gg messages' },
   { name: 'highlightWatching', label: 'Embed watchers' },
   { name: 'icons', label: 'Platform icons' },
+  { name: 'badges', label: 'Badges' },
+  { name: 'censor', label: 'Swear words' },
   { name: 'shadow', label: 'Text shadow' },
   { name: 'links', label: 'Links' },
   { name: 'removed', label: 'Removed by a moderator' },
@@ -274,6 +282,14 @@ function ChatFields({ chat, onChange }: { chat: ChatOptions; onChange: (chat: Ch
           />
           Show the YouTube chats
         </label>
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={chat.twitch}
+            onChange={(event) => onChange({ ...chat, twitch: event.currentTarget.checked })}
+          />
+          Show the Twitch chats
+        </label>
       </div>
       <label className="highlights">
         Highlighted phrases, one per line
@@ -292,7 +308,7 @@ function ChatFields({ chat, onChange }: { chat: ChatOptions; onChange: (chat: Ch
 function SetupPage() {
   const { settings, snapshot, reachable } = useAppEvents();
   const update = useUpdateState();
-  const [lists, setLists] = useState<Lists>({ embeds: '', kickChats: '', youtubeChats: '' });
+  const [lists, setLists] = useState<Lists>({ embeds: '', kickChats: '', youtubeChats: '', twitchChats: '' });
   const [overlay, setOverlay] = useState<OverlayOptions | null>(null);
   const [chat, setChat] = useState<ChatOptions | null>(null);
   const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
@@ -318,6 +334,7 @@ function SetupPage() {
         what: 'a YouTube chat',
         how: 'a handle such as @destiny, or a video id',
       },
+      { entries: lines(lists.twitchChats), parse: parseTwitchChat, what: 'a Twitch channel', how: 'a channel name, such as xqc' },
     ];
     for (const { entries, parse, what, how } of checks) {
       const unreadable = entries.find((entry) => !parse(entry));
@@ -334,6 +351,7 @@ function SetupPage() {
       embeds: lines(lists.embeds).map((entry) => parseChannel(entry)!),
       kickChats: lines(lists.kickChats).map((entry) => parseKickChat(entry)!),
       youtubeChats: lines(lists.youtubeChats).map((entry) => parseYouTubeChat(entry)!),
+      twitchChats: lines(lists.twitchChats).map((entry) => parseTwitchChat(entry)!),
       overlay,
       chat: { ...chat, highlights: lines(chat.highlights.join('\n')) },
     };
@@ -368,9 +386,19 @@ function SetupPage() {
 
   return (
     <main className="setup">
-      <h1>
-        dgg-obs-tools <span className="version">{update?.current}</span>
-      </h1>
+      <header className="page-head">
+        <h1>
+          dgg-obs-tools <span className="version">{update?.current}</span>
+        </h1>
+        <nav>
+          <a href={REPOSITORY} target="_blank" rel="noreferrer">
+            GitHub
+          </a>
+          <a href={`${REPOSITORY}/issues/new/choose`} target="_blank" rel="noreferrer">
+            Report a problem or ask for a feature
+          </a>
+        </nav>
+      </header>
       <p className="status">{chatStatus(snapshot, reachable)}</p>
       <UpdateNotice update={update} />
 
@@ -411,8 +439,16 @@ function SetupPage() {
           label="Everyone talking in these YouTube chats, one per line"
           value={lists.youtubeChats}
           placeholder="@destiny"
-          hint="A channel handle such as @destiny, which follows whatever that channel has live, or a video id or link. Everything above feeds both the overlay and the chat."
+          hint="A channel handle such as @destiny, which follows whatever that channel has live, or a video id or link."
           onChange={(youtubeChats) => setLists({ ...lists, youtubeChats })}
+        />
+        <EntryList
+          title="Twitch chats"
+          label="Everyone talking in these Twitch channels' chat, one per line"
+          value={lists.twitchChats}
+          placeholder="xqc"
+          hint="A channel name, or a twitch.tv link. Everything above feeds both the overlay and the chat."
+          onChange={(twitchChats) => setLists({ ...lists, twitchChats })}
         />
 
         <section>

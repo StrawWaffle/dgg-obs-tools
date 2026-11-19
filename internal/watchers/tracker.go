@@ -21,6 +21,7 @@ import (
 	"github.com/StrawWaffle/dgg-obs-tools/internal/dgg"
 	"github.com/StrawWaffle/dgg-obs-tools/internal/kick"
 	"github.com/StrawWaffle/dgg-obs-tools/internal/settings"
+	"github.com/StrawWaffle/dgg-obs-tools/internal/twitch"
 	"github.com/StrawWaffle/dgg-obs-tools/internal/youtube"
 )
 
@@ -52,6 +53,7 @@ type Snapshot struct {
 	Embeds       []dgg.Channel `json:"embeds"`
 	KickChats    []string      `json:"kickChats"`
 	YouTubeChats []string      `json:"youtubeChats"`
+	TwitchChats  []string      `json:"twitchChats"`
 	// For each followed YouTube channel handle, the live stream found on it, or "".
 	LiveVideos   map[string]string `json:"liveVideos"`
 	ChatCount    int               `json:"chatCount"`
@@ -90,6 +92,7 @@ type Tracker struct {
 	mu        sync.Mutex
 	settings  settings.Settings
 	catalogue *dgg.Catalogue
+	flairs    dgg.Flairs
 
 	// destiny.gg chat. New embeds need a new connection, because chat only
 	// sends its roster on connect.
@@ -201,6 +204,14 @@ func (t *Tracker) refreshCatalogue(ctx context.Context) {
 			t.publish(&t.chats, Event{Type: "emotes", Data: t.emoteVersion()})
 			t.mu.Unlock()
 		}
+		// The flair list changes about as rarely, and is read on the same clock.
+		if flairs, err := dgg.FetchFlairs(ctx, t.client); err == nil {
+			t.mu.Lock()
+			t.flairs = flairs
+			t.mu.Unlock()
+		} else if ctx.Err() == nil {
+			log.Printf("flair list: %v", err)
+		}
 		wait := catalogueEvery
 		if err != nil {
 			wait = time.Minute
@@ -222,7 +233,8 @@ func (t *Tracker) gate(ctx context.Context) {
 
 	s := t.settings
 	wantDGG := (overlayOpen && len(s.Embeds) > 0) || (chatOpen && s.Chat.DGG != "off")
-	wantOthers := (overlayOpen || chatOpen) && (len(s.KickChats) > 0 || len(s.YouTubeChats) > 0 || t.youtubeEmbeds())
+	wantOthers := (overlayOpen || chatOpen) &&
+		(len(s.KickChats) > 0 || len(s.YouTubeChats) > 0 || len(s.TwitchChats) > 0 || t.youtubeEmbeds())
 
 	switch {
 	case wantDGG && t.socket == nil:
@@ -259,7 +271,7 @@ func (t *Tracker) openDGG(ctx context.Context) {
 	go socket.Run(socketCtx)
 }
 
-// openOthers starts Kick chat and a source for each YouTube entry. A YouTube
+// openOthers starts Kick and Twitch chat and a source for each YouTube entry. A YouTube
 // handle among the embeds is looked up even when its chat is not read,
 // because destiny.gg names that embed by the live video.
 func (t *Tracker) openOthers(ctx context.Context) {
@@ -291,6 +303,15 @@ func (t *Tracker) openOthers(ctx context.Context) {
 		client := &kick.Client{
 			Channels:  t.settings.KickChats,
 			OnMessage: func(m kick.Message) { t.onKick(othersCtx, m) },
+			OnRemove:  func(r chat.Removal) { t.remove(othersCtx, r) },
+		}
+		go client.Run(othersCtx)
+	}
+
+	if len(t.settings.TwitchChats) > 0 {
+		client := &twitch.Client{
+			Channels:  t.settings.TwitchChats,
+			OnMessage: func(m twitch.Message) { t.onTwitch(othersCtx, m) },
 			OnRemove:  func(r chat.Removal) { t.remove(othersCtx, r) },
 		}
 		go client.Run(othersCtx)
@@ -369,6 +390,20 @@ func (t *Tracker) onKick(ctx context.Context, m kick.Message) {
 	}, m.At)
 }
 
+func (t *Tracker) onTwitch(ctx context.Context, m twitch.Message) {
+	t.say(ctx, chat.Message{
+		ID: m.ID, Platform: chat.Twitch, Source: m.Channel, Nick: m.Nick,
+		Color: chat.Optional(m.Color), At: m.At, Parts: m.Parts, Action: m.Action,
+	})
+	t.speak(ctx, chat.Watcher{
+		Nick:      m.Nick,
+		Platform:  chat.Twitch,
+		Color:     chat.Optional(m.Color),
+		LastEmote: chat.Optional(m.Emote),
+		EmoteURL:  chat.Optional(m.EmoteURL),
+	}, m.At)
+}
+
 func (t *Tracker) onYouTube(ctx context.Context, m youtube.Message) {
 	t.say(ctx, chat.Message{
 		ID: m.ID, Platform: chat.YouTube, Source: m.Source, Nick: m.Nick,
@@ -428,6 +463,7 @@ func (t *Tracker) snapshot() Snapshot {
 		Embeds:       t.settings.Embeds,
 		KickChats:    t.settings.KickChats,
 		YouTubeChats: t.settings.YouTubeChats,
+		TwitchChats:  t.settings.TwitchChats,
 		LiveVideos:   map[string]string{},
 		Watchers:     []chat.Watcher{},
 	}
@@ -550,7 +586,8 @@ func (t *Tracker) SetSettings(next settings.Settings) error {
 	t.settings = next
 	if !slices.Equal(previous.Embeds, next.Embeds) ||
 		!slices.Equal(previous.KickChats, next.KickChats) ||
-		!slices.Equal(previous.YouTubeChats, next.YouTubeChats) {
+		!slices.Equal(previous.YouTubeChats, next.YouTubeChats) ||
+		!slices.Equal(previous.TwitchChats, next.TwitchChats) {
 		// Everything follows the new list from scratch; the next tick reopens
 		// what is wanted. Kick and YouTube speakers from embeds no longer
 		// followed go with it.

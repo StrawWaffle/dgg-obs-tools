@@ -17,6 +17,7 @@ func TestValidateTidiesEachList(t *testing.T) {
 	}
 	s.KickChats = []string{"Destiny", "destiny", "anythingelse"}
 	s.YouTubeChats = []string{"@Destiny", "P7Xv5DdqL0k"}
+	s.TwitchChats = []string{"xQc", "xqc"}
 	if err := s.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -30,6 +31,9 @@ func TestValidateTidiesEachList(t *testing.T) {
 	}
 	if !slices.Equal(s.KickChats, []string{"destiny", "anythingelse"}) {
 		t.Fatalf("kick %v", s.KickChats)
+	}
+	if !slices.Equal(s.TwitchChats, []string{"xqc"}) {
+		t.Fatalf("twitch %v", s.TwitchChats)
 	}
 	// A video id keeps its case, because YouTube's ids are case sensitive.
 	if !slices.Equal(s.YouTubeChats, []string{"@destiny", "P7Xv5DdqL0k"}) {

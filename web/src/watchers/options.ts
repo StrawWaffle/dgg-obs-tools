@@ -19,7 +19,7 @@ export interface Channel {
  */
 export interface Watcher {
   nick: string;
-  platform: 'dgg' | 'kick' | 'youtube';
+  platform: 'dgg' | 'kick' | 'youtube' | 'twitch';
   /** The destiny.gg flair their name is coloured by, resolved the way chat resolves it. */
   flair: string | null;
   /** A name colour the platform gives directly (Kick). */
@@ -36,6 +36,7 @@ export interface WatchersSnapshot {
   embeds: Channel[];
   kickChats: string[];
   youtubeChats: string[];
+  twitchChats: string[];
   /** For each followed YouTube channel handle, the live stream found on it, or "". */
   liveVideos: Record<string, string>;
   /** Everyone on them, which may be more than `watchers` carries. */
@@ -97,6 +98,8 @@ export interface Settings {
   kickChats: string[];
   /** YouTube chats: a handle such as @destiny, followed from stream to stream, or a video id. */
   youtubeChats: string[];
+  /** Twitch channels whose chat is read. */
+  twitchChats: string[];
   overlay: OverlayOptions;
   chat: ChatOptions;
 }
@@ -107,10 +110,15 @@ export interface ChatOptions {
   dgg: 'all' | 'watching' | 'off';
   kick: boolean;
   youtube: boolean;
+  twitch: boolean;
   /** Percent of the standard size, text and emotes together. */
   size: number;
   shadow: 'none' | 'soft' | 'strong';
   icons: 'on' | 'off';
+  /** destiny.gg's flair badges beside names. */
+  badges: 'on' | 'off';
+  /** Whether swear words and slurs are starred out. */
+  censor: 'on' | 'off';
   /** Phrases that highlight a message, matched without case. */
   highlights: string[];
   /** Whether destiny.gg messages from people watching a followed embed stand out. */
@@ -129,6 +137,8 @@ export const CHAT_LABELS = {
   dgg: { all: 'All of destiny.gg chat', watching: 'Only people watching the embeds', off: 'None' },
   shadow: { none: 'None', soft: 'Soft', strong: 'Strong outline' },
   icons: { on: 'Platform icons', off: 'No icons' },
+  badges: { on: 'destiny.gg badges', off: 'No badges' },
+  censor: { off: 'As written', on: 'Swear words starred out' },
   highlightWatching: { on: 'Highlight embed watchers', off: "Don't highlight them" },
   links: { short: 'Shortened', full: 'In full' },
   removed: { hide: 'Hide them', blur: 'Blur them', keep: 'Keep showing them' },
@@ -144,9 +154,17 @@ export interface MessagePart {
 }
 
 /** One message from any of the followed chats. */
+/** A small picture beside a name, such as a destiny.gg flair. */
+export interface Badge {
+  label: string;
+  url: string;
+  width: number;
+  height: number;
+}
+
 export interface ChatMessage {
   id: string;
-  platform: 'dgg' | 'kick' | 'youtube';
+  platform: 'dgg' | 'kick' | 'youtube' | 'twitch';
   /** "destiny.gg", or the Kick channel or YouTube entry it was said in. */
   source: string;
   nick: string;
@@ -154,7 +172,9 @@ export interface ChatMessage {
   color: string | null;
   at: string;
   parts: MessagePart[];
-  /** A destiny.gg /me message. */
+  /** destiny.gg flair badges, in chat's order. */
+  badges?: Badge[];
+  /** A /me message. */
   action?: boolean;
   /** A destiny.gg message starting with ">". */
   green?: boolean;
@@ -207,7 +227,7 @@ export const LABELS = {
   enter: { fade: 'Fade', spin: 'Spin', slide: 'Slide', random: 'Mixed' },
   motion: { drift: 'Wander', bob: 'Bob up and down', orbit: 'Small circles', sway: 'Sway side to side' },
   color: { flair: 'Chat colours', white: 'Plain white' },
-  marks: { on: 'Kick / YouTube icons', off: 'No icons' },
+  marks: { on: 'Platform icons', off: 'No icons' },
 } as const;
 
 /**
@@ -242,6 +262,7 @@ function channelFromLink(text: string): Channel | null {
   const host = url.hostname.replace(/^www\./, '').replace(/^m\./, '');
   const path = url.pathname.split('/').filter(Boolean);
   if (host === 'kick.com' && path[0]) return { platform: 'kick', id: path[0].toLowerCase() };
+  if (host === 'twitch.tv' && path[0]) return { platform: 'twitch', id: path[0].toLowerCase() };
   if (host === 'youtu.be' && path[0] && VIDEO_ID.test(path[0])) return { platform: 'youtube', id: path[0] };
   if (host === 'youtube.com') {
     const video = url.searchParams.get('v') ?? (path[0] === 'live' ? path[1] : null);
@@ -271,4 +292,13 @@ export function parseYouTubeChat(input: string): string | null {
   const entry = text.replace(/^youtube\//i, '');
   if (VIDEO_ID.test(entry)) return entry;
   return /^@[\w.-]{3,30}$/.test(entry) ? entry.toLowerCase() : null;
+}
+
+/** A Twitch chat: `xqc`, `twitch/xqc` or a twitch.tv link. */
+export function parseTwitchChat(input: string): string | null {
+  const text = input.trim();
+  const fromLink = channelFromLink(text);
+  if (fromLink) return fromLink.platform === 'twitch' ? fromLink.id : null;
+  const login = text.replace(/^twitch\//i, '').toLowerCase();
+  return /^[a-z0-9_]{3,25}$/.test(login) ? login : null;
 }

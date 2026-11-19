@@ -1,12 +1,15 @@
 # dgg-obs-tools
 
-OBS browser sources that draw destiny.gg, Kick and YouTube chat on your stream. It's a single
-small program: run it, pick an embed, and paste one URL into OBS.
+OBS browser sources that draw destiny.gg, Kick, YouTube and Twitch chat on
+your stream: an overlay of who is watching, and one combined chat. It's a
+single small program: run it, say what to follow, and paste a URL into OBS.
+
+![The watchers overlay: people watching the followed streams, each drawn as the last emote they used, with their name in its chat colour](docs/screenshots/overlay.png)
 
 ## Watchers
 
 Shows the people watching a stream as the last emote each of them used, with
-their name in its chat colour. It draws from any mix of three sources, each
+their name in its chat colour. It draws from any mix of four sources, each
 followed on its own:
 
 - **destiny.gg embeds:** everyone in destiny.gg chat with that embed open
@@ -14,23 +17,20 @@ followed on its own:
 - **Kick chats:** everyone talking in a Kick channel's chat.
 - **YouTube chats:** everyone talking in a YouTube stream's chat. A channel
   handle such as `@destiny` follows whatever that channel has live.
+- **Twitch chats:** everyone talking in a Twitch channel's chat.
 
-Kick and YouTube emotes are drawn from those sites' own pictures, and a small
-K or YT mark can show where somebody is talking. The same name on two
+Kick, YouTube and Twitch emotes are drawn from those sites' own pictures, and
+a small platform icon can show where somebody is talking. The same name on two
 platforms is two people.
 
-Layouts include free float, a safe frame around the edges,
-a bottom rail, side columns and bumper cars, plus options for speed, size,
-entrances and names.
-
-Everything it shows is already public in those chats. It connects anonymously
-and needs no login or API key. Kick and YouTube chat are read the way their own
-web pages read them, which neither site documents, so a change on their side
-can break that part until an update follows.
+Layouts include free float, a safe frame around the edges, a bottom rail, side
+columns and bumper cars, plus options for speed, size, entrances and names.
 
 ## Chat
 
-The same followed chats as one combined chat: destiny.gg, Kick and YouTube
+<img src="docs/screenshots/chat.png" alt="The combined chat in a browser: destiny.gg, Twitch and YouTube messages in one column, with platform icons, flair badges, name colours and emotes" width="360" align="right">
+
+The followed chats as one combined chat: destiny.gg, Kick, YouTube and Twitch
 messages in a single column, with each platform's emotes, name colours and a
 small platform icon. Open it in a browser to read along, or add it to OBS,
 where it draws on a transparent background.
@@ -38,16 +38,25 @@ where it draws on a transparent background.
 Options on the setup page:
 
 - which destiny.gg messages show: all of chat, only people watching the
-  followed embeds, or none; and whether the Kick and YouTube chats show
+  followed embeds, or none; and whether the Kick, YouTube and Twitch chats show
 - highlighted phrases, and highlighting destiny.gg people who are watching
   the followed embeds
 - what happens to a message a moderator removes or a user banned: hidden,
   blurred (hover to read, in a browser) or kept
+- destiny.gg's flair badges beside names, and starring out swear words and slurs
 - size, text shadow, platform icons, shortened links, and how many messages
   stay on screen
 
 In a browser, scrolling up stops the chat moving so you can read back, and a
-button takes you to the newest messages again.
+button takes you to the newest messages again. Very dark name colours, which
+some people pick on Twitch and Kick, are lightened until they can be read.
+
+Everything shown is already public in those chats. The app connects
+anonymously and needs no login or API key. Kick and YouTube chat are read the
+way their own web pages read them, which neither site documents, so a change
+on their side can break that part until an update follows.
+
+<br clear="right">
 
 ## Download
 
@@ -66,20 +75,23 @@ There's nothing to install: put it anywhere and run it.
 It keeps itself up to date. A few times a day it checks for a new release,
 verifies it against the release's checksums and puts it in place of its own
 file. It never restarts by itself, so an update can't interrupt a stream: the
-setup page offers a **Restart** button, and otherwise the next launch uses the
-new version.
+setup page and the tray menu offer a restart, and otherwise the next launch
+uses the new version.
 
 ## Setup
 
+![The setup page: the two OBS addresses to copy, and the lists of embeds and chats to follow](docs/screenshots/setup.png)
+
 1. Run `dgg-obs-tools`. It opens its setup page in your browser at
    `http://localhost:7341/`.
-2. Fill in any of the three lists, one entry per line, and click **Save**:
+2. Fill in any of the four lists, one entry per line, and click **Save**:
    - **destiny.gg embeds** as `platform/name`: `kick/destiny`,
      `youtube/@destiny` or `youtube/VIDEO_ID`, or a `destiny.gg/bigscreen#...` link.
    - **Kick chats** as a channel name (`destiny`) or a kick.com link.
    - **YouTube chats** as a handle (`@destiny`), a video id, or a YouTube link.
+   - **Twitch chats** as a channel name (`xqc`) or a twitch.tv link.
 
-   Everything listed is drawn together in one overlay.
+   Everything listed feeds both the overlay and the chat.
 3. In OBS add a **Browser** source with the URL `http://localhost:7341/watchers`
    for the watchers overlay (sized 1920 × 1080), or `http://localhost:7341/chat`
    for the chat (any size you like).
@@ -103,12 +115,19 @@ is kept in the same folder.
 Options: `-port` serves on another port, and `-no-browser` skips opening the
 setup page.
 
+## Problems and ideas
+
+[Open an issue](https://github.com/StrawWaffle/dgg-obs-tools/issues/new/choose)
+to report something that isn't working or to ask for a feature; there's a form
+for each. The setup page links there too. For a problem, the version (shown at
+the top of the setup page) and the log file above help most.
+
 ## Why it runs on your machine
 
 destiny.gg's chat socket refuses connections from any web page that isn't
 destiny.gg, and an OBS browser source is a web page. So something outside the
 browser has to hold the connection. This program does that and serves the
-overlay to OBS on `localhost` only.
+overlay and the chat to OBS on `localhost` only.
 
 ## Building
 

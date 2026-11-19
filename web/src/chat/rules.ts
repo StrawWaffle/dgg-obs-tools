@@ -11,6 +11,8 @@ export function shown(message: ChatMessage, options: ChatOptions): boolean {
       return options.kick;
     case 'youtube':
       return options.youtube;
+    case 'twitch':
+      return options.twitch;
   }
 }
 
@@ -46,4 +48,17 @@ export function linkText(link: string, style: ChatOptions['links']): string {
   } catch {
     return `${link.slice(0, 39)}…`;
   }
+}
+
+/**
+ * Swear words and slurs. A stem catches every word that starts with it; the
+ * short ones are matched only as whole words, so "spicy" and "cockpit" stay.
+ */
+const STEMS = ['fuck', 'shit', 'cunt', 'bitch', 'bastard', 'asshole', 'nigg', 'fagg', 'retard', 'whore', 'slut', 'wank', 'tranny', 'trannies'];
+const WORDS = ['fag', 'fags', 'dick', 'dicks', 'cock', 'cocks', 'pussy', 'twat', 'twats', 'kike', 'kikes', 'spic', 'spics', 'chink', 'chinks', 'kys', 'cum'];
+const SWEARING = new RegExp(`\\b(?:(?:${STEMS.join('|')})[a-z]*|(?:${WORDS.join('|')}))\\b`, 'gi');
+
+/** Text with every swear word starred out after its first letter. */
+export function censor(text: string): string {
+  return text.replace(SWEARING, (word) => word[0] + '*'.repeat(word.length - 1));
 }

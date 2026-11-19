@@ -168,3 +168,10 @@ html:has(.chat-obs) body {
 .chat-more:hover {
   border-color: #8a8a8a;
 }
+
+/* destiny.gg's flair badges, at the size its chat draws them. */
+.chat-line .chat-badge {
+  height: 16px;
+  margin-right: 4px;
+  vertical-align: -3px;
+}

@@ -1,0 +1,72 @@
+name: Something isn't working
+description: The app, the overlay or the chat does something wrong, or stops working.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected to see instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to make it happen
+      description: The steps that lead to it, if you know them. Which embeds or chats were followed helps.
+      placeholder: |
+        1. Follow kick/destiny under destiny.gg embeds
+        2. Open the chat in OBS
+        3. ...
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where
+      multiple: true
+      options:
+        - Watchers overlay
+        - Chat
+        - Setup page
+        - Tray icon or updates
+        - Starting the app
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Chat platform involved
+      multiple: true
+      options:
+        - destiny.gg
+        - Kick
+        - YouTube
+        - Twitch
+        - None in particular
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Shown next to the name at the top of the setup page, such as v0.6.0.
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS
+        - Linux
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: |
+        The log of the latest run, if it says anything. It is `dgg-obs-tools.log` in `%APPDATA%\dgg-obs-tools`
+        on Windows, `~/Library/Application Support/dgg-obs-tools` on macOS, or `~/.config/dgg-obs-tools` on Linux.
+      render: text
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: Screenshot
+      description: A picture of the problem, if it is something you can see. Drag it in here.

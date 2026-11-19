@@ -13,6 +13,7 @@ const (
 	DGG     = "dgg"
 	Kick    = "kick"
 	YouTube = "youtube"
+	Twitch  = "twitch"
 )
 
 // Watcher is one person an overlay can draw. On destiny.gg that is somebody
